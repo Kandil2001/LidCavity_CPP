@@ -10,52 +10,80 @@
   </a>
 </p>
 
-A standalone C++17 implementation of the classical two-dimensional lid-driven cavity benchmark for incompressible flow. The project solves the cavity problem using a structured Cartesian grid, a pressure-correction workflow, and a small parameter study covering mesh size, Reynolds number, convection scheme, and pressure-solver choice.
+This is a standalone C++ CFD project for the classical **2D lid-driven cavity** benchmark. I built it to have a clean serial C++ solver that is easy to run, easy to inspect, and useful as a baseline before adding faster versions later.
 
-The goal of this repository is to keep the numerical method readable while still making the project useful as a CFD/HPC portfolio baseline. The current implementation is intentionally a **serial C++ solver**. It is the reference version that future OpenMP, MPI, CUDA, or other accelerated implementations can be compared against.
+The project solves the incompressible cavity flow problem on a structured grid, exports the results as CSV files, and uses Python for post-processing and validation plots.
 
 <p align="center">
   <img src="assets/figures/readme_overview.svg" alt="Overview of the C++ lid-driven cavity results" width="900">
 </p>
 
-## What is included
+## Why this project
 
-- Serial C++17 lid-driven cavity solver
-- Structured collocated Cartesian grid
-- Pseudo-transient pressure-correction workflow
-- First-order upwind and central-difference convection options
-- Red-black Gauss-Seidel and red-black SOR pressure-correction solvers
-- Validation against the Ghia et al. centreline velocity benchmark
-- CSV export for final fields, residual histories, and study summaries
-- Python post-processing for contours, streamlines, residuals, validation plots, and study comparisons
-- Bash scripts for smoke, single, quick, medium, and full studies
-- GitHub Actions smoke test
+The lid-driven cavity is a simple geometry, but it is a very useful CFD benchmark. It shows the main ideas behind incompressible flow solvers: wall boundary conditions, vortex formation, pressure correction, residual tracking, and validation against reference data.
+
+I wanted this repository to be more than just a single source file. The goal was to make it look and feel like a small engineering project:
+
+- a clear C++ solver,
+- repeatable run scripts,
+- structured CSV output,
+- Python post-processing,
+- validation against Ghia et al.,
+- selected figures and result summaries for GitHub.
+
+The current version is intentionally a **serial C++ baseline**. It is not OpenMP, MPI, CUDA, or vectorized C++ yet. Those versions can be added later and compared against this one.
+
+## What the solver does
+
+- Solves the 2D incompressible lid-driven cavity problem
+- Uses a unit square cavity with a moving top lid
+- Runs Reynolds numbers `100`, `400`, and `1000`
+- Supports grid sizes `32`, `64`, and `128`
+- Includes `upwind` and `central` convection schemes
+- Includes `RBGS` and `RBSOR` pressure-correction solvers
+- Exports final fields and residual histories as CSV files
+- Compares centreline velocities with the Ghia et al. benchmark
+- Generates contours, streamlines, residual plots, and validation plots using Python
 
 ## Representative result
 
-The case below uses `N = 128`, `Re = 1000`, central differencing, RBSOR pressure correction, and the serial C++ implementation.
+The case below uses:
+
+```text
+N = 128
+Re = 1000
+scheme = central
+pressure solver = RBSOR
+implementation = serial_cpp
+```
 
 | Flow field | Centreline validation |
 |---|---|
 | ![Streamlines](assets/figures/re1000_streamlines.svg) | ![Ghia u validation](assets/figures/re1000_ghia_u.svg) |
 | ![Velocity magnitude](assets/figures/re1000_speed.svg) | ![Ghia v validation](assets/figures/re1000_ghia_v.svg) |
 
-## Numerical approach
+## Numerical method
 
-The solver advances the non-dimensional incompressible Navier-Stokes equations in pseudo-time. Each outer iteration predicts the velocity field, solves a pressure-correction Poisson equation, corrects velocity and pressure, reapplies boundary conditions, and records convergence diagnostics.
+The solver uses a pseudo-transient pressure-correction workflow. In each outer iteration, the code:
 
-A detailed explanation is available in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
+1. applies the lid and wall boundary conditions,
+2. predicts the velocity field,
+3. solves the pressure-correction Poisson equation,
+4. corrects velocity and pressure,
+5. records residuals and validation metrics.
 
-## Study design
+The full method is explained in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
-The full study runs:
+## Study setup
+
+The full study contains 36 simulations:
 
 ```text
 3 meshes × 3 Reynolds numbers × 2 convection schemes × 2 pressure solvers × 1 serial implementation
 = 36 simulations
 ```
 
-The cases cover:
+The tested setup is:
 
 ```text
 meshes:             32, 64, 128
@@ -65,36 +93,47 @@ pressure solvers:   RBGS, RBSOR
 implementation:     serial_cpp
 ```
 
-The compact full-study summary is stored in:
+The compact full-study summary is included here:
 
 ```text
 results/data/study_summary_full.csv
 ```
 
-## Current results
+## Result highlights
 
-From the current full-study run:
+The results are better on the refined grid, which is expected for this benchmark. The strongest point from the current run is that **all `N = 128` cases passed the selected Ghia centreline validation thresholds**, including the `Re = 1000` cases.
 
-- `36` cases were executed.
-- `22/36` cases passed the selected Ghia centreline-error threshold used in the code.
-- Every case reached the configured maximum outer-iteration limit, so the results are useful for comparison but are not described as fully converged.
-- The `Re = 100` cases showed the best agreement with the benchmark.
-- RBSOR strongly reduced pressure-solver iterations and runtime compared with RBGS.
+From the current full study:
+
+- `36` simulations were executed.
+- `22/36` cases passed the selected Ghia validation threshold.
+- `12/12` cases on the `N = 128` grid passed the validation threshold.
+- The best agreement was obtained with the `N = 128`, `Re = 100`, central-difference cases.
+- At `Re = 400` and `Re = 1000`, the refined-grid central cases still captured the expected cavity-flow behaviour and passed the selected validation threshold.
+- RBSOR gave almost the same validation error as RBGS while being much faster.
 
 | Pressure solver | Cases | Mean runtime [s] | Total runtime [s] | Mean Poisson iterations |
 |---|---:|---:|---:|---:|
 | RBGS | 18 | 790.2 | 14224.3 | 1333.1 |
 | RBSOR | 18 | 176.6 | 3178.9 | 264.5 |
 
+In this study, RBSOR was about **4.5× faster** overall and used about **5× fewer pressure iterations** on average than RBGS.
+
+| Re | Best case | N | Scheme | Pressure solver | Ghia `u` L2 | Ghia `v` L2 |
+|---:|---:|---:|---|---|---:|---:|
+| 100 | 28 | 128 | central | RBSOR | 0.0031 | 0.0041 |
+| 400 | 32 | 128 | central | RBSOR | 0.0539 | 0.0652 |
+| 1000 | 36 | 128 | central | RBSOR | 0.1102 | 0.1109 |
+
 The full study took approximately **4.83 hours** on the machine where the uploaded results were generated.
 
-More detailed notes are available in [docs/RESULTS.md](docs/RESULTS.md).
+More details are available in [docs/RESULTS.md](docs/RESULTS.md).
 
 ![Pressure solver comparison](assets/figures/study_pressure_solver_iterations.svg)
 
-## Run the project
+## How to run
 
-On Linux, WSL, or the university cluster:
+On Linux, WSL, or a university cluster:
 
 ```bash
 bash scripts/run_smoke_test.sh   # small compilation/output check
@@ -104,9 +143,19 @@ bash scripts/run_medium.sh       # medium study
 bash scripts/run_full.sh         # full 36-case study
 ```
 
-Generated CSV files are written to `results/data/`. Generated figures are written to `results/figures/`.
+Generated CSV files are written to:
 
-Detailed running instructions are in [docs/RUNNING.md](docs/RUNNING.md).
+```text
+results/data/
+```
+
+Generated figures are written to:
+
+```text
+results/figures/
+```
+
+More detailed instructions are in [docs/RUNNING.md](docs/RUNNING.md).
 
 ## Plot the results
 
@@ -116,7 +165,7 @@ After running the solver:
 bash scripts/plot_results.sh
 ```
 
-The Python script reads the C++ CSV files and generates post-processing figures, including contours, streamlines, quiver plots, residual histories, Ghia validation curves, and study comparison plots.
+The Python script reads the C++ CSV files and generates post-processing figures, including velocity contours, pressure contours, streamlines, vorticity contours, residual histories, Ghia validation curves, and study comparison plots.
 
 ## Repository layout
 
@@ -171,14 +220,15 @@ The study summary contains the case setup, runtime, residuals, pressure-solver s
 
 ## Limitations
 
-This is an educational and portfolio CFD solver, not a replacement for a production CFD package. The current version is serial only, uses a simple pressure-correction approach, and does not include multigrid acceleration or Rhie-Chow interpolation. The high-Reynolds-number cases are useful for comparison but still need more convergence tuning.
+This is an educational and portfolio CFD solver, not a replacement for a production CFD package. The current version is serial only and uses a simple pressure-correction approach. The refined-grid results are promising, but the code can still be improved with better convergence control, acceleration, and cleaner solver modularization.
 
 ## Planned extensions
 
-1. Improve convergence behaviour for `Re = 400` and `Re = 1000`.
-2. Add an OpenMP implementation and compare speedup against `serial_cpp`.
-3. Add a cleaner benchmark table for accuracy and runtime.
-4. Add MPI and CUDA versions as separate implementations later.
+1. Improve convergence control and stopping criteria.
+2. Split the solver into smaller C++ modules.
+3. Add an OpenMP implementation and compare it with `serial_cpp`.
+4. Add benchmark tables for accuracy, runtime, and speedup.
+5. Add MPI or CUDA versions later.
 
 ## Reference
 
