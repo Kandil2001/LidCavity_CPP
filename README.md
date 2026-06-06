@@ -15,7 +15,7 @@ This is a standalone C++ CFD project for the classical **2D lid-driven cavity** 
 The project solves the incompressible cavity flow problem on a structured grid, exports the results as CSV files, and uses Python for post-processing and validation plots.
 
 <p align="center">
-  <img src="assets/figures/readme_overview.svg" alt="Overview of the C++ lid-driven cavity results" width="900">
+  <img src="assets/figures/refined_grid_validation_summary.svg" alt="Refined-grid validation summary" width="900">
 </p>
 
 ## Why this project
@@ -45,17 +45,17 @@ The current version is intentionally a **serial C++ baseline**. It is not OpenMP
 - Compares centreline velocities with the Ghia et al. benchmark
 - Generates contours, streamlines, residual plots, and validation plots using Python
 
-## Representative result
+## Representative results
 
-The case below uses:
+The strongest results to show are the refined-grid central/RBSOR cases. They combine the best validation behaviour with the faster pressure solver.
 
-```text
-N = 128
-Re = 1000
-scheme = central
-pressure solver = RBSOR
-implementation = serial_cpp
-```
+| Re | Best case | N | Scheme | Pressure solver | Ghia `u` L2 | Ghia `v` L2 |
+|---:|---:|---:|---|---|---:|---:|
+| 100 | 28 | 128 | central | RBSOR | 0.0031 | 0.0041 |
+| 400 | 32 | 128 | central | RBSOR | 0.0539 | 0.0652 |
+| 1000 | 36 | 128 | central | RBSOR | 0.1102 | 0.1109 |
+
+The high-Reynolds-number case below is still useful visually because it shows the stronger recirculation structure at `Re = 1000`:
 
 | Flow field | Centreline validation |
 |---|---|
@@ -101,7 +101,7 @@ results/data/study_summary_full.csv
 
 ## Result highlights
 
-The results are better on the refined grid, which is expected for this benchmark. The strongest point from the current run is that **all `N = 128` cases passed the selected Ghia centreline validation thresholds**, including the `Re = 1000` cases.
+The refined-grid cases give the clearest validation story. All `N = 128` cases passed the selected Ghia centreline validation thresholds, including the `Re = 1000` cases.
 
 From the current full study:
 
@@ -118,12 +118,6 @@ From the current full study:
 | RBSOR | 18 | 176.6 | 3178.9 | 264.5 |
 
 In this study, RBSOR was about **4.5× faster** overall and used about **5× fewer pressure iterations** on average than RBGS.
-
-| Re | Best case | N | Scheme | Pressure solver | Ghia `u` L2 | Ghia `v` L2 |
-|---:|---:|---:|---|---|---:|---:|
-| 100 | 28 | 128 | central | RBSOR | 0.0031 | 0.0041 |
-| 400 | 32 | 128 | central | RBSOR | 0.0539 | 0.0652 |
-| 1000 | 36 | 128 | central | RBSOR | 0.1102 | 0.1109 |
 
 The full study took approximately **4.83 hours** on the machine where the uploaded results were generated.
 
