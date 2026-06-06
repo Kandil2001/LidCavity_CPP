@@ -15,27 +15,15 @@ For each case, the solver reports L2 and Linf errors against the benchmark value
 
 The validation thresholds used in the code are practical comparison limits. They help classify which numerical setups are behaving reasonably, but they are not a full verification and validation study.
 
-From the current uploaded full study:
+From the current full study:
 
-- 22 out of 36 C++ cases passed the selected Ghia centreline-error threshold.
+- 22 out of 36 cases passed the selected Ghia centreline-error threshold.
 - The `Re = 100`, `N = 128`, central-difference cases showed the best agreement.
 - The high-Reynolds-number cases show the expected flow structure, but still need convergence and parameter tuning.
 
-## Why the C++ and MATLAB results are not exactly identical
+## Important notes
 
-The C++ solver follows the same physical and numerical setup as the MATLAB solver, but the floating-point update order is different. Therefore, the correct expectation is:
-
-```text
-MATLAB result ≈ C++ result
-```
-
-not:
-
-```text
-MATLAB result == C++ result bit by bit
-```
-
-Small differences in update order, residual history, and stopping behaviour are normal.
+The validation results should be read together with the residual history and maximum-iteration status. In the current run, all cases reached the configured maximum outer-iteration limit. This means the data is useful for comparing numerical setups, but the high-Re cases should not be presented as fully converged final benchmark results.
 
 ## Reference
 
