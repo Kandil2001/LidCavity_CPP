@@ -9,17 +9,17 @@
   </a>
 </p>
 
-A two-dimensional incompressible-flow solver for the classical lid-driven cavity benchmark, written in C++17.
+A C++17 implementation of the two-dimensional lid-driven cavity benchmark.
 
-I built this project to have a clean serial C++ baseline that can be compiled from the terminal, run as a parameter study, and extended later with OpenMP, MPI, or CUDA. The solver exports CSV files, and Python is used only for post-processing and plots.
+This repository is one part of a larger project where the same CFD benchmark will be implemented and compared in MATLAB, C++, C, Python, OpenMP, MPI, CUDA, and OpenFOAM. The goal is to keep the physical setup the same across all versions, then compare accuracy, runtime, implementation style, and scalability.
 
-This repository is part of the same benchmark series as [LidCavity_MATLAB](https://github.com/Kandil2001/LidCavity_MATLAB), but it is written and presented as its own C++ implementation.
+This version is the **serial C++ baseline**. It is not meant to be the fastest version yet. It is meant to be clean, readable, and reliable enough to compare against the parallel versions later.
 
 ## What is included
 
 - Structured collocated Cartesian grid
 - Pseudo-transient pressure-correction algorithm
-- Serial C++17 implementation
+- Serial C++17 solver
 - First-order upwind and central convection schemes
 - Red-black Gauss-Seidel and red-black SOR pressure solvers
 - Validation against Ghia et al. centreline velocity data
@@ -34,7 +34,9 @@ The full parameter study runs 36 combinations:
 
 ## Representative result
 
-The best result to show first is the refined-grid central/RBSOR case. It gives the cleanest validation behaviour while keeping the pressure solve faster than RBGS.
+For all implementations in this benchmark series, I want to keep the result layout the same: flow-field plots on one side and Ghia centreline validation on the other. This makes the MATLAB, C++, and later OpenMP/MPI/CUDA/OpenFOAM versions easier to compare.
+
+For the C++ repo, the refined-grid central/RBSOR cases are the best cases to show first because they give the strongest validation behaviour while keeping the pressure solve faster than RBGS.
 
 | Best refined cases | N | Scheme | Pressure solver | Ghia `u` L2 | Ghia `v` L2 |
 |---:|---:|---|---|---:|---:|
@@ -117,9 +119,10 @@ This is an educational solver, not a replacement for a production CFD package. I
 
 - Improve convergence control and stopping criteria
 - Split the solver into smaller C++ modules
-- Add an OpenMP implementation and compare it with `serial_cpp`
-- Add benchmark tables for accuracy, runtime, and speedup
-- Add MPI or CUDA versions later
+- Add the OpenMP version and compare it with `serial_cpp`
+- Add MPI and CUDA versions as separate implementations
+- Add Python, C, and OpenFOAM versions under the same benchmark specification
+- Build one comparison table for accuracy, runtime, and speedup across all implementations
 
 ## Reference
 
