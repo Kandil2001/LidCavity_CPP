@@ -16,7 +16,7 @@ with `L = 1` and `U_lid = 1`.
 
 ## Numerical model
 
-The code solves the incompressible Navier-Stokes equations in non-dimensional form using a pseudo-transient pressure-correction workflow. The main goal is not to build a production CFD solver, but to expose the important parts of the algorithm clearly:
+The code solves the incompressible Navier-Stokes equations in non-dimensional form using a pseudo-transient pressure-correction workflow. The main goal is to expose the important parts of the algorithm clearly:
 
 1. initialize velocity and pressure,
 2. apply lid and wall boundary conditions,
@@ -54,6 +54,6 @@ The solver uses a pseudo-time-step based on convective and diffusive restriction
 
 After each case, the code compares the computed centreline velocity profiles against the benchmark data from Ghia et al. The reported values are practical L2 and Linf errors for comparison between cases. They are not meant to replace a formal verification study.
 
-## Notes on equivalence with MATLAB
+## Implementation notes
 
-The C++ code follows the same benchmark and study setup as the MATLAB solver, but it is not a line-by-line translation. MATLAB vectorized array operations and C++ loop updates do not produce bitwise-identical floating-point histories. The expected comparison is therefore numerical agreement within tolerance, not exact matching of every iteration value.
+The code is written as a serial C++17 baseline. The current focus is clarity and reproducibility rather than maximum speed. Future accelerated versions should be added as separate implementations so that accuracy, runtime, and scalability can be compared cleanly.
