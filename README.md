@@ -9,27 +9,22 @@
   </a>
 </p>
 
-A two-dimensional incompressible-flow solver for the classical lid-driven cavity benchmark, written in C++17. I built this project to have a clear serial CFD baseline that can be compiled from the terminal, run as a parameter study, and extended later with OpenMP, MPI, or CUDA.
+A two-dimensional incompressible-flow solver for the classical lid-driven cavity benchmark, written in C++17.
 
-The solver uses a pressure-correction workflow, exports the numerical fields as CSV files, and uses Python only for post-processing and plots. This makes the repository easy to run on Linux, WSL, or a university cluster.
+I built this project to have a clean serial C++ baseline that can be compiled from the terminal, run as a parameter study, and extended later with OpenMP, MPI, or CUDA. The solver exports CSV files, and Python is used only for post-processing and plots.
 
-This project is part of the same CFD benchmark series as [LidCavity_MATLAB](https://github.com/Kandil2001/LidCavity_MATLAB), but it is presented as its own C++ implementation rather than as a line-by-line translation.
-
-<p align="center">
-  <img src="assets/figures/readme_overview.svg" alt="Overview of the C++ lid-driven cavity results" width="900">
-</p>
+This repository is part of the same benchmark series as [LidCavity_MATLAB](https://github.com/Kandil2001/LidCavity_MATLAB), but it is written and presented as its own C++ implementation.
 
 ## What is included
 
-- Serial C++17 lid-driven cavity solver
 - Structured collocated Cartesian grid
 - Pseudo-transient pressure-correction algorithm
+- Serial C++17 implementation
 - First-order upwind and central convection schemes
 - Red-black Gauss-Seidel and red-black SOR pressure solvers
 - Validation against Ghia et al. centreline velocity data
 - CSV export for fields, residual histories, and study summaries
 - Python post-processing for contours, streamlines, validation plots, and runtime comparisons
-- Bash scripts for smoke, single, quick, medium, and full studies
 
 The full parameter study runs 36 combinations:
 
@@ -39,9 +34,15 @@ The full parameter study runs 36 combinations:
 
 ## Representative result
 
-The overview above uses a refined-grid case, `N = 128`, `Re = 100`, central differencing, and RBSOR. I chose this case as the main visual because it gives the cleanest validation against the Ghia benchmark while still showing the flow field clearly.
+The best result to show first is the refined-grid central/RBSOR case. It gives the cleanest validation behaviour while keeping the pressure solve faster than RBGS.
 
-The high-Reynolds-number case below is useful as a second visual because it shows the stronger recirculation structure at `Re = 1000`.
+| Best refined cases | N | Scheme | Pressure solver | Ghia `u` L2 | Ghia `v` L2 |
+|---:|---:|---|---|---:|---:|
+| Re = 100 | 128 | central | RBSOR | 0.0031 | 0.0041 |
+| Re = 400 | 128 | central | RBSOR | 0.0539 | 0.0652 |
+| Re = 1000 | 128 | central | RBSOR | 0.1102 | 0.1109 |
+
+The `Re = 1000` case below is useful visually because the main recirculation region is clearer.
 
 | Flow field | Centreline validation |
 |---|---|
@@ -58,17 +59,11 @@ A more detailed description is available in [docs/METHODOLOGY.md](docs/METHODOLO
 
 - `22/36` cases met the selected Ghia centreline-error limits.
 - All `N = 128` cases met the selected validation limits.
-- The best validation behaviour came from the refined-grid central-difference cases.
+- The refined-grid central-difference cases gave the best validation behaviour.
 - RBSOR gave almost the same validation error as RBGS while strongly reducing pressure-solver cost.
 - The full study took about **4.83 hours** on the machine where the uploaded results were generated.
 
-The validation limits are practical comparison thresholds, not a replacement for a formal grid-independence or verification study. See [docs/RESULTS.md](docs/RESULTS.md) for the full discussion.
-
-| Re | Best case | N | Scheme | Pressure solver | Ghia `u` L2 | Ghia `v` L2 |
-|---:|---:|---:|---|---|---:|---:|
-| 100 | 28 | 128 | central | RBSOR | 0.0031 | 0.0041 |
-| 400 | 32 | 128 | central | RBSOR | 0.0539 | 0.0652 |
-| 1000 | 36 | 128 | central | RBSOR | 0.1102 | 0.1109 |
+The validation limits are practical comparison thresholds, not a replacement for a formal verification or grid-independence study. See [docs/RESULTS.md](docs/RESULTS.md) for the full discussion.
 
 ![Pressure solver comparison](assets/figures/study_pressure_solver_iterations.svg)
 
@@ -116,15 +111,15 @@ On Windows, WSL is recommended because the scripts are written for a Linux-style
 
 ## Limitations
 
-This is an educational solver, not a replacement for a production CFD package. It uses a simple pressure-correction approach on a collocated grid and does not include multigrid acceleration or Rhie-Chow interpolation. The refined-grid results are useful, but the convergence strategy and high-Reynolds-number behaviour are still the main areas for improvement.
+This is an educational solver, not a replacement for a production CFD package. It uses a collocated grid without Rhie-Chow interpolation and an iterative pressure solver without multigrid acceleration. The convergence strategy and high-Reynolds-number behaviour are the main areas for further improvement.
 
-## Planned extensions
+## Next steps
 
-1. Improve convergence control and stopping criteria.
-2. Split the solver into smaller C++ modules.
-3. Add an OpenMP implementation and compare it with `serial_cpp`.
-4. Add benchmark tables for accuracy, runtime, and speedup.
-5. Add MPI or CUDA versions later.
+- Improve convergence control and stopping criteria
+- Split the solver into smaller C++ modules
+- Add an OpenMP implementation and compare it with `serial_cpp`
+- Add benchmark tables for accuracy, runtime, and speedup
+- Add MPI or CUDA versions later
 
 ## Reference
 
