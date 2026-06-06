@@ -11,9 +11,9 @@
 
 A C++17 implementation of the two-dimensional lid-driven cavity benchmark.
 
-This repository is one part of a larger project where the same CFD benchmark will be implemented and compared in MATLAB, C++, C, Python, OpenMP, MPI, CUDA, and OpenFOAM. The goal is to keep the physical setup the same across all versions, then compare accuracy, runtime, implementation style, and scalability.
+This repository is one part of a larger CFD benchmark series where I solve the same physical problem with different tools and implementation styles. The goal is to keep the setup consistent, then compare accuracy, runtime, code structure, and scalability across MATLAB, C++, C, Python, OpenMP, MPI, CUDA, and OpenFOAM.
 
-This version is the **serial C++ baseline**. It is not meant to be the fastest version yet. It is meant to be clean, readable, and reliable enough to compare against the parallel versions later.
+This version is the **serial C++ baseline**. I use it as the clean single-core version that later OpenMP, MPI, and CUDA implementations can be compared against. It is not meant to be the fastest version yet; it is meant to be readable, reproducible, and reliable enough for fair comparisons.
 
 ## What is included
 
@@ -34,17 +34,9 @@ The full parameter study runs 36 combinations:
 
 ## Representative result
 
-For all implementations in this benchmark series, I want to keep the result layout the same: flow-field plots on one side and Ghia centreline validation on the other. This makes the MATLAB, C++, and later OpenMP/MPI/CUDA/OpenFOAM versions easier to compare.
+For the whole benchmark series, I want the result layout to stay the same: flow-field plots on one side and Ghia centreline validation on the other. This makes the MATLAB, C++, and later OpenMP/MPI/CUDA/OpenFOAM versions easier to compare.
 
-For the C++ repo, the refined-grid central/RBSOR cases are the best cases to show first because they give the strongest validation behaviour while keeping the pressure solve faster than RBGS.
-
-| Best refined cases | N | Scheme | Pressure solver | Ghia `u` L2 | Ghia `v` L2 |
-|---:|---:|---|---|---:|---:|
-| Re = 100 | 128 | central | RBSOR | 0.0031 | 0.0041 |
-| Re = 400 | 128 | central | RBSOR | 0.0539 | 0.0652 |
-| Re = 1000 | 128 | central | RBSOR | 0.1102 | 0.1109 |
-
-The `Re = 1000` case below is useful visually because the main recirculation region is clearer.
+The C++ example below uses `N = 128`, `Re = 1000`, central differencing, RBSOR, and the serial implementation. This case is useful visually because the main recirculation region is clear.
 
 | Flow field | Centreline validation |
 |---|---|
@@ -113,16 +105,17 @@ On Windows, WSL is recommended because the scripts are written for a Linux-style
 
 ## Limitations
 
-This is an educational solver, not a replacement for a production CFD package. It uses a collocated grid without Rhie-Chow interpolation and an iterative pressure solver without multigrid acceleration. The convergence strategy and high-Reynolds-number behaviour are the main areas for further improvement.
+This is an educational solver, not a replacement for a production CFD package. It uses a collocated grid without Rhie-Chow interpolation and an iterative pressure solver without multigrid acceleration. The convergence strategy and pressure-velocity treatment are the main areas for further improvement.
 
 ## Next steps
 
 - Improve convergence control and stopping criteria
 - Split the solver into smaller C++ modules
-- Add the OpenMP version and compare it with `serial_cpp`
+- Add the OpenMP version and compare it with this serial C++ baseline
 - Add MPI and CUDA versions as separate implementations
 - Add Python, C, and OpenFOAM versions under the same benchmark specification
-- Build one comparison table for accuracy, runtime, and speedup across all implementations
+- Keep the result layout consistent across all implementations
+- Build one comparison table for accuracy, runtime, and speedup across the full benchmark suite
 
 ## Reference
 
