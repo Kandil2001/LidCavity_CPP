@@ -11,9 +11,13 @@
 
 A C++17 implementation of the two-dimensional lid-driven cavity benchmark.
 
-This repository is one part of a larger project where the same CFD benchmark will be implemented and compared in MATLAB, C++, C, Python, OpenMP, MPI, CUDA, and OpenFOAM. The goal is to keep the physical setup the same across all versions, then compare accuracy, runtime, implementation style, and scalability.
+This repository is one part of a larger CFD benchmark series where the same physical problem is implemented in MATLAB, C++, C, Python, OpenMP, MPI, CUDA, and OpenFOAM. The goal is to keep the setup consistent across all versions, then compare accuracy, runtime, implementation style, and scalability.
 
 This version is the **serial C++ baseline**. It is not meant to be the fastest version yet. It is meant to be clean, readable, and reliable enough to compare against the parallel versions later.
+
+<p align="center">
+  <img src="assets/figures/readme_overview.svg" alt="C++ lid-driven cavity overview" width="90%">
+</p>
 
 ## What is included
 
@@ -34,7 +38,7 @@ The full parameter study runs 36 combinations:
 
 ## Representative result
 
-For all implementations in this benchmark series, I want to keep the result layout the same: flow-field plots on one side and Ghia centreline validation on the other. This makes the MATLAB, C++, and later OpenMP/MPI/CUDA/OpenFOAM versions easier to compare.
+For all implementations in this benchmark series, I want to keep the result layout the same: flow-field plots beside Ghia centreline validation. This makes the MATLAB, C++, and later OpenMP/MPI/CUDA/OpenFOAM versions easier to compare.
 
 For the C++ repo, the refined-grid central/RBSOR cases are the best cases to show first because they give the strongest validation behaviour while keeping the pressure solve faster than RBGS.
 
@@ -44,12 +48,13 @@ For the C++ repo, the refined-grid central/RBSOR cases are the best cases to sho
 | Re = 400 | 128 | central | RBSOR | 0.0539 | 0.0652 |
 | Re = 1000 | 128 | central | RBSOR | 0.1102 | 0.1109 |
 
-The `Re = 1000` case below is useful visually because the main recirculation region is clearer.
+The `Re = 1000` case is used below because the recirculation structure is visually clearer.
 
 | Flow field | Centreline validation |
 |---|---|
-| ![Streamlines](assets/figures/re1000_streamlines.svg) | ![Ghia u validation](assets/figures/re1000_ghia_u.svg) |
-| ![Velocity magnitude](assets/figures/re1000_speed.svg) | ![Ghia v validation](assets/figures/re1000_ghia_v.svg) |
+| ![Streamlines at Re 1000](assets/figures/re1000_streamlines.svg) | ![Ghia u validation at Re 1000](assets/figures/re1000_ghia_u.svg) |
+| ![Velocity magnitude at Re 1000](assets/figures/re1000_speed.svg) | ![Ghia v validation at Re 1000](assets/figures/re1000_ghia_v.svg) |
+| ![Vorticity at Re 1000](assets/figures/re1000_vorticity.svg) | ![Refined-grid validation summary](assets/figures/refined_grid_validation_summary.svg) |
 
 ## Numerical approach
 
@@ -67,7 +72,10 @@ A more detailed description is available in [docs/METHODOLOGY.md](docs/METHODOLO
 
 The validation limits are practical comparison thresholds, not a replacement for a formal verification or grid-independence study. See [docs/RESULTS.md](docs/RESULTS.md) for the full discussion.
 
-![Pressure solver comparison](assets/figures/study_pressure_solver_iterations.svg)
+| Study summary | Runtime / pressure cost |
+|---|---|
+| ![Ghia error study](assets/figures/study_ghia_error.svg) | ![Runtime comparison](assets/figures/study_runtime.svg) |
+| ![Quality summary](assets/figures/study_quality_summary.svg) | ![Pressure solver iteration comparison](assets/figures/study_pressure_solver_iterations.svg) |
 
 ## Run the project
 
