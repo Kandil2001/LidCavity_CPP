@@ -3,17 +3,16 @@
 <p align="center">
   <img src="https://img.shields.io/badge/C%2B%2B-17-blue.svg" alt="C++17">
   <img src="https://img.shields.io/badge/Python-post--processing-green.svg" alt="Python post-processing">
+  <img src="https://img.shields.io/badge/CFD-lid--driven--cavity-orange.svg" alt="CFD benchmark">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License">
   <a href="https://kandil2001.github.io/">
     <img src="https://img.shields.io/badge/Portfolio-kandil2001.github.io-2ea44f.svg" alt="Portfolio">
   </a>
 </p>
 
-A serial C++ implementation of the classical two-dimensional lid-driven cavity benchmark. This project is the C++ continuation of my MATLAB SIMPLE-based solver, using the same physical setup and parameter-study logic while exporting the results as CSV files for Python post-processing.
+A standalone C++17 implementation of the classical two-dimensional lid-driven cavity benchmark for incompressible flow. The project solves the cavity problem using a structured Cartesian grid, a pressure-correction workflow, and a small parameter study covering mesh size, Reynolds number, convection scheme, and pressure-solver choice.
 
-I built this version to turn the MATLAB learning code into a cleaner terminal-based CFD/HPC portfolio project. The current solver is intentionally a **serial C++ baseline**. It is not presented as a fake vectorized C++ solver. The goal is to have a reliable reference implementation before adding OpenMP, MPI, or CUDA versions later.
-
-This repository is part of my wider lid-cavity implementation comparison, where the same benchmark is gradually implemented in MATLAB, C++, Python, OpenMP, MPI, CUDA, and OpenFOAM.
+The goal of this repository is to keep the numerical method readable while still making the project useful as a CFD/HPC portfolio baseline. The current implementation is intentionally a **serial C++ solver**. It is the reference version that future OpenMP, MPI, CUDA, or other accelerated implementations can be compared against.
 
 <p align="center">
   <img src="assets/figures/readme_overview.svg" alt="Overview of the C++ lid-driven cavity results" width="900">
@@ -24,31 +23,13 @@ This repository is part of my wider lid-cavity implementation comparison, where 
 - Serial C++17 lid-driven cavity solver
 - Structured collocated Cartesian grid
 - Pseudo-transient pressure-correction workflow
-- First-order upwind and central convection schemes
-- Red-black Gauss-Seidel and red-black SOR pressure solvers
-- Ghia et al. centreline velocity validation
-- CSV export for fields, residual histories, and study summaries
-- Python post-processing for contours, streamlines, residuals, validation plots, and study-level comparisons
+- First-order upwind and central-difference convection options
+- Red-black Gauss-Seidel and red-black SOR pressure-correction solvers
+- Validation against the Ghia et al. centreline velocity benchmark
+- CSV export for final fields, residual histories, and study summaries
+- Python post-processing for contours, streamlines, residuals, validation plots, and study comparisons
 - Bash scripts for smoke, single, quick, medium, and full studies
-
-## Relation to the MATLAB version
-
-The MATLAB project contains two MATLAB implementations: a loop-based version and a vectorized momentum-predictor version. This C++ repository currently contains one implementation:
-
-```text
-serial_cpp
-```
-
-The C++ solver follows the same benchmark idea, boundary conditions, Reynolds-number set, mesh set, convection schemes, pressure solvers, validation data, and study modes. The outputs are expected to match the MATLAB solution trend within numerical tolerance, but not bit-by-bit, because MATLAB and C++ use different operation ordering and update paths.
-
-The full C++ study runs:
-
-```text
-3 meshes × 3 Reynolds numbers × 2 schemes × 2 pressure solvers × 1 implementation
-= 36 simulations
-```
-
-The MATLAB full study runs 72 cases because it has two MATLAB implementations.
+- GitHub Actions smoke test
 
 ## Representative result
 
@@ -61,19 +42,38 @@ The case below uses `N = 128`, `Re = 1000`, central differencing, RBSOR pressure
 
 ## Numerical approach
 
-The solver advances the non-dimensional incompressible Navier-Stokes equations in pseudo-time. Each outer iteration predicts the velocity field, solves a pressure-correction Poisson equation, corrects velocity and pressure, applies boundary conditions, and records convergence diagnostics.
+The solver advances the non-dimensional incompressible Navier-Stokes equations in pseudo-time. Each outer iteration predicts the velocity field, solves a pressure-correction Poisson equation, corrects velocity and pressure, reapplies boundary conditions, and records convergence diagnostics.
 
 A detailed explanation is available in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
-## Study observations
+## Study design
 
-The compact full-study summary is included in:
+The full study runs:
+
+```text
+3 meshes × 3 Reynolds numbers × 2 convection schemes × 2 pressure solvers × 1 serial implementation
+= 36 simulations
+```
+
+The cases cover:
+
+```text
+meshes:             32, 64, 128
+Reynolds numbers:   100, 400, 1000
+schemes:            upwind, central
+pressure solvers:   RBGS, RBSOR
+implementation:     serial_cpp
+```
+
+The compact full-study summary is stored in:
 
 ```text
 results/data/study_summary_full.csv
 ```
 
-From the current run:
+## Current results
+
+From the current full-study run:
 
 - `36` cases were executed.
 - `22/36` cases passed the selected Ghia centreline-error threshold used in the code.
@@ -85,7 +85,6 @@ From the current run:
 |---|---:|---:|---:|---:|
 | RBGS | 18 | 790.2 | 14224.3 | 1333.1 |
 | RBSOR | 18 | 176.6 | 3178.9 | 264.5 |
-
 
 The full study took approximately **4.83 hours** on the machine where the uploaded results were generated.
 
@@ -117,7 +116,7 @@ After running the solver:
 bash scripts/plot_results.sh
 ```
 
-The Python script reads the C++ CSV files and generates MATLAB-style post-processing figures, including contours, streamlines, quiver plots, residual histories, Ghia validation curves, and study comparison plots.
+The Python script reads the C++ CSV files and generates post-processing figures, including contours, streamlines, quiver plots, residual histories, Ghia validation curves, and study comparison plots.
 
 ## Repository layout
 
@@ -125,10 +124,10 @@ The Python script reads the C++ CSV files and generates MATLAB-style post-proces
 src/           C++ solver
 scripts/       build, run, plot, and clean scripts
 postprocess/   Python plotting and result-summary tools
-validation/    implemented inside the C++ solver through Ghia benchmark tables
 assets/        selected figures for the README and documentation
-docs/          methodology, running, validation, and result notes
+docs/          methodology, running, validation, scope, and result notes
 results/       compact summary only; full generated output is ignored by Git
+.github/       GitHub Actions workflow
 ```
 
 ## Requirements
@@ -145,7 +144,7 @@ For the Python post-processing:
 python3 -m pip install -r requirements.txt
 ```
 
-On Windows, I recommend WSL because the scripts are written for a Linux-style terminal.
+On Windows, WSL is recommended because the scripts are written for a Linux-style terminal.
 
 ## Output files
 
