@@ -16,3 +16,4 @@ if [ "$#" -eq 0 ]; then
 fi
 
 python3 postprocess/plot_cpp_results.py "$@"
+python3 postprocess/plot_mesh_validation.py
