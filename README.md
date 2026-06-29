@@ -33,7 +33,7 @@ Implemented features:
 The full study runs 36 cases:
 
 ```text
-3 meshes × 3 Reynolds numbers × 2 schemes × 2 pressure solvers
+3 meshes x 3 Reynolds numbers x 2 schemes x 2 pressure solvers
 ```
 
 ## Example result
@@ -63,15 +63,11 @@ I compare:
 - `u(y)` on the vertical centreline `x = 0.5`,
 - `v(x)` on the horizontal centreline `y = 0.5`.
 
-For the README, the validation plots are kept separate from the flow plots so they stay readable.
+For the README, the validation plots are shown side by side.
 
-<p align="center">
-  <img src="assets/figures/re1000_ghia_u.svg" alt="Ghia u validation, Re=1000" width="720">
-</p>
-
-<p align="center">
-  <img src="assets/figures/re1000_ghia_v.svg" alt="Ghia v validation, Re=1000" width="720">
-</p>
+| Ghia u validation | Ghia v validation |
+|---|---|
+| ![Ghia u validation](assets/figures/re1000_ghia_u.svg) | ![Ghia v validation](assets/figures/re1000_ghia_v.svg) |
 
 For each case, the code reports `L2` and `Linf` errors against the benchmark points.
 
@@ -188,10 +184,10 @@ So the current results are useful for comparing setups and building the benchmar
 
 ## Reference
 
-Ghia, U., Ghia, K. N., & Shin, C. T. (1982). *High-Re solutions for incompressible flow using the Navier-Stokes equations and a multigrid method*. Journal of Computational Physics, 48(3), 387–411.
+Ghia, U., Ghia, K. N., & Shin, C. T. (1982). *High-Re solutions for incompressible flow using the Navier-Stokes equations and a multigrid method*. Journal of Computational Physics, 48(3), 387-411.
 
 ## Author
 
-Ahmed Kandil — [Portfolio](https://kandil2001.github.io/) · [LinkedIn](https://www.linkedin.com/in/ahmed-kandil03/)
+Ahmed Kandil - [Portfolio](https://kandil2001.github.io/) - [LinkedIn](https://www.linkedin.com/in/ahmed-kandil03/)
 
 Released under the [MIT License](LICENSE).
