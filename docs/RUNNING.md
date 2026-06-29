@@ -30,15 +30,17 @@ The smoke test uses a very small setup. It is only meant to check that the code 
 bash scripts/run_single.sh
 ```
 
-This runs:
+This runs the same case shown in the README:
 
 ```text
-N = 64
-Re = 100
+N = 128
+Re = 1000
 scheme = central
-pressure solver = RBGS
+pressure solver = RBSOR
 implementation = serial_cpp
 ```
+
+This case is useful as a visual and validation example because it uses the refined grid and the faster pressure solver.
 
 ## Quick study
 
@@ -65,7 +67,7 @@ bash scripts/run_full.sh
 The full C++ study runs 36 cases:
 
 ```text
-3 meshes × 3 Reynolds numbers × 2 schemes × 2 pressure solvers × 1 serial C++ implementation
+3 meshes × 3 Reynolds numbers × 2 convection schemes × 2 pressure solvers × 1 serial C++ implementation
 ```
 
 This can take several hours depending on the CPU.
@@ -78,7 +80,7 @@ After running one or more cases:
 bash scripts/plot_results.sh
 ```
 
-The plotting script reads the CSV files in `results/data/` and writes PNG figures to `results/figures/`.
+The plotting script reads the CSV files in `results/data/` and writes figures to `results/figures/`.
 
 ## Cleaning generated files
 
@@ -92,7 +94,7 @@ This removes the compiled binary and generated CSV files.
 
 ```text
 results/data/       CSV outputs
-results/figures/    generated PNG figures
+results/figures/    generated figures
 ```
 
 The repository keeps only the compact full-study summary and selected README figures. Full generated case files are ignored by Git because they can become large.
