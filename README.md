@@ -74,8 +74,6 @@ The best cases to show are the refined-grid central + RBSOR cases:
 | 400 | 32 | 128 | central | RBSOR | 0.0539 | 0.0652 | 527.6 |
 | 1000 | 36 | 128 | central | RBSOR | 0.1102 | 0.1109 | 647.6 |
 
-![Refined-grid validation summary](assets/figures/refined_grid_validation_summary.svg)
-
 The full study result is:
 
 - 36 cases were run,
