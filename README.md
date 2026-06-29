@@ -48,12 +48,11 @@ pressure solver = RBSOR
 implementation = serial_cpp
 ```
 
-I use this as the main README example because it is one of the refined-grid cases and the flow structure is clear.
+I use this case in the README because the main recirculation region is clear.
 
-| Flow field | Ghia validation |
+| Streamlines | Velocity magnitude |
 |---|---|
-| ![Streamlines](assets/figures/re1000_streamlines.svg) | ![Ghia u validation](assets/figures/re1000_ghia_u.svg) |
-| ![Velocity magnitude](assets/figures/re1000_speed.svg) | ![Ghia v validation](assets/figures/re1000_ghia_v.svg) |
+| ![Streamlines](assets/figures/re1000_streamlines.svg) | ![Velocity magnitude](assets/figures/re1000_speed.svg) |
 
 ## Validation
 
@@ -64,9 +63,19 @@ I compare:
 - `u(y)` on the vertical centreline `x = 0.5`,
 - `v(x)` on the horizontal centreline `y = 0.5`.
 
+For the README, the validation plots are kept separate from the flow plots so they stay readable.
+
+<p align="center">
+  <img src="assets/figures/re1000_ghia_u.svg" alt="Ghia u validation, Re=1000" width="720">
+</p>
+
+<p align="center">
+  <img src="assets/figures/re1000_ghia_v.svg" alt="Ghia v validation, Re=1000" width="720">
+</p>
+
 For each case, the code reports `L2` and `Linf` errors against the benchmark points.
 
-The best cases to show are the refined-grid central + RBSOR cases:
+The best refined-grid central + RBSOR cases are:
 
 | Re | Case | N | Scheme | Pressure solver | Ghia `u` L2 | Ghia `v` L2 | Runtime [s] |
 |---:|---:|---:|---|---|---:|---:|---:|
@@ -74,7 +83,7 @@ The best cases to show are the refined-grid central + RBSOR cases:
 | 400 | 32 | 128 | central | RBSOR | 0.0539 | 0.0652 | 527.6 |
 | 1000 | 36 | 128 | central | RBSOR | 0.1102 | 0.1109 | 647.6 |
 
-The full study result is:
+From the full study:
 
 - 36 cases were run,
 - 22 cases passed the selected Ghia error limits,
