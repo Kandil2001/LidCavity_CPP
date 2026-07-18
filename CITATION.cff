@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software or study in academic work, please cite it using this metadata."
+title: "Lid-Driven Cavity Flow Solver in C++"
+type: software
+authors:
+  - family-names: Kandil
+    given-names: Ahmed
+    orcid: "https://orcid.org/0009-0007-2724-4565"
+repository-code: "https://github.com/Kandil2001/LidCavity_CPP"
+url: "https://kandil2001.github.io/projects/lid-cavity-cpp.html"
+license: MIT
+keywords:
+  - computational fluid dynamics
+  - lid-driven cavity
+  - pressure correction
+  - C++
+  - numerical methods
+  - Ghia benchmark
