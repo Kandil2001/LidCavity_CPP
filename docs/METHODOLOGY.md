@@ -1,10 +1,10 @@
 # Methodology
 
-This document explains the numerical workflow used by the C++ lid-driven cavity solver.
+This document explains the numerical workflow used by the completed C++ lid-driven cavity solver.
 
 ## Problem definition
 
-The solver models the classical two-dimensional square lid-driven cavity. The domain is a unit square. The top wall moves with a non-dimensional horizontal velocity of `U_lid = 1`, while the left, right, and bottom walls are stationary. No-slip velocity boundary conditions are applied on all walls.
+The solver models the classical two-dimensional square lid-driven cavity. The domain is a unit square. The top wall moves with a nondimensional horizontal velocity of `U_lid = 1`, while the left, right, and bottom walls are stationary. No-slip velocity boundary conditions are applied on all walls.
 
 The Reynolds number is controlled through the kinematic viscosity:
 
@@ -16,44 +16,44 @@ with `L = 1` and `U_lid = 1`.
 
 ## Numerical model
 
-The code solves the incompressible Navier-Stokes equations in non-dimensional form using a pseudo-transient pressure-correction workflow. The main goal is to expose the important parts of the algorithm clearly:
+The code solves the incompressible Navier-Stokes equations in nondimensional form using a pseudo-transient pressure-correction workflow:
 
-1. initialize velocity and pressure,
-2. apply lid and wall boundary conditions,
-3. predict the velocity field,
-4. solve the pressure-correction Poisson equation,
-5. correct velocity and pressure,
-6. record residuals and validation metrics,
-7. repeat until the iteration limit or stopping criteria are reached.
+1. initialize velocity and pressure
+2. apply lid and wall boundary conditions
+3. predict the velocity field
+4. solve the pressure-correction Poisson equation
+5. correct velocity and pressure
+6. record residuals and validation metrics
+7. repeat until the iteration limit or stopping criteria are reached
 
 ## Spatial discretization
 
-The domain is discretized on a structured Cartesian grid. The current C++ version uses a collocated storage layout and manual indexing through a flat `std::vector<double>` container.
+The domain is discretized on a structured Cartesian grid. The C++ version uses a collocated storage layout and manual indexing through a flat `std::vector<double>` container.
 
 The study supports two convection schemes:
 
-- `upwind`: more dissipative but more stable,
-- `central`: less dissipative and usually more accurate for the benchmark profiles.
+- `upwind`: more dissipative but more stable
+- `central`: less dissipative and generally more accurate for the benchmark profiles
 
 Diffusion terms are approximated with standard second-order finite differences.
 
 ## Pressure correction
 
-The pressure-correction equation is solved iteratively using one of two red-black methods:
+The pressure-correction equation is solved iteratively using:
 
-- `RBGS`: red-black Gauss-Seidel,
-- `RBSOR`: red-black successive over-relaxation.
+- `RBGS`: red-black Gauss-Seidel
+- `RBSOR`: red-black Successive Over-Relaxation
 
-The current full-study output shows that RBSOR significantly reduces the average number of Poisson iterations compared with RBGS.
+The recorded study shows that RBSOR substantially reduces the average number of Poisson iterations compared with RBGS.
 
 ## Time-step logic
 
-The solver uses a pseudo-time-step based on convective and diffusive restrictions. This keeps the update conservative enough for the tested Reynolds numbers while allowing the same setup to run across several meshes.
+The solver uses a pseudo-time step based on convective and diffusive restrictions. This keeps the update conservative enough for the tested Reynolds numbers while allowing the same setup to run across several meshes.
 
 ## Validation
 
-After each case, the code compares the computed centreline velocity profiles against the benchmark data from Ghia et al. The reported values are practical L2 and Linf errors for comparison between cases. They are not meant to replace a formal verification study.
+After each case, the code compares the computed centerline velocity profiles with the benchmark data from Ghia et al. The reported values are practical `L2` and `Linf` errors for comparing cases. They do not replace a formal verification or uncertainty study.
 
 ## Implementation notes
 
-The code is written as a serial C++17 baseline. The current focus is clarity and reproducibility rather than maximum speed. Future accelerated versions should be added as separate implementations so that accuracy, runtime, and scalability can be compared cleanly.
+The code is a completed serial C++17 baseline focused on clarity and reproducibility rather than maximum performance. Accelerated implementations are developed separately in the broader work-in-progress solver-comparison repository so that numerical behavior, runtime, and scalability can be compared transparently.
