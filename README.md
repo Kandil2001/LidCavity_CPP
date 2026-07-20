@@ -3,6 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Status-Completed-brightgreen.svg" alt="Completed">
   <img src="https://img.shields.io/badge/C%2B%2B-17-blue.svg" alt="C++17">
+  <img src="https://img.shields.io/badge/Build-GCC%208%2B-brightgreen.svg" alt="GCC 8 and newer">
   <img src="https://img.shields.io/badge/Python-post--processing-green.svg" alt="Python post-processing">
   <a href="https://github.com/Kandil2001/LidCavity_CPP/actions/workflows/ci.yml">
     <img src="https://github.com/Kandil2001/LidCavity_CPP/actions/workflows/ci.yml/badge.svg" alt="C++ build and smoke test">
@@ -33,6 +34,7 @@ Implemented features:
 - CSV output for fields, residuals, and study summaries
 - Python scripts for plotting fields, residuals, validation, and runtime summaries
 - GitHub Actions build, smoke execution, and output verification
+- portable filesystem linking for modern compilers and GCC 8 HPC nodes
 
 The completed study contains 36 configured cases:
 
@@ -120,6 +122,8 @@ bash scripts/run_medium.sh       # medium study
 bash scripts/run_full.sh         # complete 36-case configuration
 ```
 
+The build script compiles the source to an object file, links normally on current compilers, and retries with `-lstdc++fs` only when an older GCC toolchain requires it. The same command therefore works on modern Linux systems and on GCC 8-based cluster nodes.
+
 Generate the plots with:
 
 ```bash
@@ -133,6 +137,25 @@ results/data/       CSV output files
 results/figures/    generated plots
 ```
 
+## Stromboli smoke test — 20 July 2026
+
+The repository was compiled and executed successfully on the Stromboli HPC cluster with GCC 8.5.0 after adding the portable filesystem-link fallback.
+
+The smoke configuration was intentionally tiny:
+
+| Setting | Value |
+|---|---:|
+| Grid | `N = 16` |
+| Reynolds number | `100` |
+| Convection scheme | upwind |
+| Pressure solver | RBGS |
+| Outer iterations | `20` |
+| Runtime | approximately `0.01 s` |
+
+The smoke run reached the configured `maxIter` limit and did **not** meet the Ghia validation thresholds. That is expected for this deliberately short case. Its purpose is only to verify compilation, execution, argument handling, and CSV output—not numerical convergence.
+
+The archived log and generated smoke-test data are stored in [`results/stromboli_2026-07-20`](results/stromboli_2026-07-20).
+
 ## Continuous integration
 
 The GitHub Actions workflow runs the existing `scripts/run_smoke_test.sh` path, then verifies:
@@ -141,18 +164,20 @@ The GitHub Actions workflow runs the existing `scripts/run_smoke_test.sh` path, 
 - the smoke-study summary contains exactly one `N = 16`, `Re = 100` case
 - at least one convergence-history CSV was generated
 
-This is a fast build-and-execution check. It does not claim that the full 36-case study is rerun on every commit.
+This is a fast build-and-execution check. It does not claim that the full 36-case study is rerun or numerically validated on every commit.
 
 ## Repository structure
 
 ```text
-src/           C++ solver
-scripts/       build, run, plot, and clean scripts
-postprocess/   Python plotting scripts
-assets/        selected figures used in the README
-docs/          methodology, running notes, validation, and results
-results/       generated outputs
-.github/       build-and-smoke GitHub Actions workflow
+src/                                   C++ solver
+scripts/                               build, run, plot, and clean scripts
+postprocess/                           Python plotting scripts
+assets/                                selected README figures
+docs/                                  methodology, running notes, validation, and results
+results/data/                          full-study CSV output
+results/figures/                       full-study generated plots
+results/stromboli_2026-07-20/          archived HPC smoke test
+.github/                               build-and-smoke GitHub Actions workflow
 ```
 
 ## Requirements
@@ -181,7 +206,7 @@ This completed project records the implemented solver and study as they were con
 - high-Reynolds-number cases that need stronger convergence control
 - no formal grid-convergence or uncertainty study
 
-The natural next research step is not to relabel the project as incomplete, but to build a new, stricter benchmark protocol around these documented limitations.
+The natural next research step is to build a stricter verification and convergence protocol around these documented limitations.
 
 ## Reference
 
