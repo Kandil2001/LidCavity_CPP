@@ -1,0 +1,12 @@
+Built: /home/m2328670/github-runs/stromboli_all_runs/20260720_220141_core_only/work/LidCavity_CPP/bin/lid_cavity
+
+LID-DRIVEN CAVITY C++ SOLVER
+Mode: smoke
+Total simulations: 1
+Summary: results/data/study_summary_smoke.csv
+
+[001] N=16 Re=100 Scheme=upwind Pressure=RBGS Implementation=serial_cpp
+      status=maxIter quality=needs_improvement iter=20/20 Rc_mass=8.566e-05 Rc_div=1.927e-02 runtime=0.01s avgPiter=50.0 pSat=1.00
+      Ghia L2: u=1.719e-01(limit 3.000e-02), v=1.298e-01(limit 3.000e-02), pass=0
+
+Finished. CSV outputs are in results/data

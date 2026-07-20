@@ -6,6 +6,6 @@ mkdir -p "$ROOT_DIR/bin"
 
 g++ -std=c++17 -O3 -march=native -Wall -Wextra -pedantic \
     "$ROOT_DIR/src/lid_cavity.cpp" \
-    -o "$ROOT_DIR/bin/lid_cavity"
+    -o "$ROOT_DIR/bin/lid_cavity" -lstdc++fs
 
 echo "Built: $ROOT_DIR/bin/lid_cavity"

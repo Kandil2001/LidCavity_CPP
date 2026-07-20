@@ -1,0 +1,4 @@
+Host: node13.stromboli
+g++: /usr/bin/g++
+g++ (GCC) 8.5.0 20210514 (Red Hat 8.5.0-28)
+scripts/run_smoke_test.sh: line 2: set: pipefail: invalid option name
