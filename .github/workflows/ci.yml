@@ -1,0 +1,45 @@
+name: C++ build and smoke test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build and run smoke case
+        run: bash scripts/run_smoke_test.sh
+
+      - name: Verify generated outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x bin/lid_cavity
+          test -s results/data/study_summary_smoke.csv
+          compgen -G 'results/data/*history*.csv' > /dev/null
+          python3 - <<'PY'
+          import csv
+          from pathlib import Path
+
+          summary = Path('results/data/study_summary_smoke.csv')
+          rows = list(csv.DictReader(summary.open(encoding='utf-8')))
+          if len(rows) != 1:
+              raise SystemExit(f'Expected one smoke-test case, found {len(rows)}')
+
+          row = rows[0]
+          if row.get('N') != '16' or row.get('Re') != '100':
+              raise SystemExit(f'Unexpected smoke-test setup: {row}')
+
+          print('Verified C++ smoke case and generated CSV outputs.')
+          PY
