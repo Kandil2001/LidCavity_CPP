@@ -2,10 +2,21 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-mkdir -p "$ROOT_DIR/bin"
+CXX="${CXX:-g++}"
+BIN_DIR="$ROOT_DIR/bin"
+OBJECT="$BIN_DIR/lid_cavity.o"
+TARGET="$BIN_DIR/lid_cavity"
 
-g++ -std=c++17 -O3 -march=native -Wall -Wextra -pedantic \
-    "$ROOT_DIR/src/lid_cavity.cpp" \
-    -o "$ROOT_DIR/bin/lid_cavity" -lstdc++fs
+mkdir -p "$BIN_DIR"
 
-echo "Built: $ROOT_DIR/bin/lid_cavity"
+"$CXX" -std=c++17 -O3 -march=native -Wall -Wextra -pedantic \
+    -c "$ROOT_DIR/src/lid_cavity.cpp" \
+    -o "$OBJECT"
+
+if ! "$CXX" "$OBJECT" -o "$TARGET"; then
+    echo "Initial link failed; retrying with -lstdc++fs for older GCC toolchains."
+    "$CXX" "$OBJECT" -o "$TARGET" -lstdc++fs
+fi
+
+rm -f "$OBJECT"
+echo "Built: $TARGET"
