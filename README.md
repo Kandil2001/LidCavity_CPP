@@ -4,9 +4,12 @@
   <img src="https://img.shields.io/badge/Status-Completed-brightgreen.svg" alt="Completed">
   <img src="https://img.shields.io/badge/C%2B%2B-17-blue.svg" alt="C++17">
   <img src="https://img.shields.io/badge/Python-post--processing-green.svg" alt="Python post-processing">
+  <a href="https://github.com/Kandil2001/LidCavity_CPP/actions/workflows/ci.yml">
+    <img src="https://github.com/Kandil2001/LidCavity_CPP/actions/workflows/ci.yml/badge.svg" alt="C++ build and smoke test">
+  </a>
   <img src="https://img.shields.io/badge/License-MIT-lightgrey.svg" alt="MIT License">
-  <a href="https://kandil2001.github.io/">
-    <img src="https://img.shields.io/badge/Portfolio-kandil2001.github.io-2ea44f.svg" alt="Portfolio">
+  <a href="https://kandil2001.github.io/projects/lid-cavity-cpp.html">
+    <img src="https://img.shields.io/badge/Portfolio-Case%20Study-2ea44f.svg" alt="Portfolio case study">
   </a>
 </p>
 
@@ -26,10 +29,10 @@ Implemented features:
 - collocated Cartesian grid
 - pseudo-transient pressure-correction method
 - upwind and central convection schemes
-- red-black Gauss-Seidel pressure solver
-- red-black SOR pressure solver
+- red-black Gauss-Seidel and red-black SOR pressure solvers
 - CSV output for fields, residuals, and study summaries
 - Python scripts for plotting fields, residuals, validation, and runtime summaries
+- GitHub Actions build, smoke execution, and output verification
 
 The completed study contains 36 configured cases:
 
@@ -101,15 +104,7 @@ This distinction is important when comparing the results with other solver imple
 
 ## Numerical workflow
 
-The solver advances the nondimensional incompressible Navier-Stokes equations in pseudo-time.
-
-Each outer iteration:
-
-1. predicts velocity
-2. solves the pressure-correction equation
-3. corrects velocity and pressure
-4. reapplies wall boundary conditions
-5. records residual information
+The solver advances the nondimensional incompressible Navier-Stokes equations in pseudo-time. Each outer iteration predicts velocity, solves the pressure-correction equation, corrects velocity and pressure, reapplies wall boundary conditions, and records residual information.
 
 More details are available in [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md).
 
@@ -138,6 +133,16 @@ results/data/       CSV output files
 results/figures/    generated plots
 ```
 
+## Continuous integration
+
+The GitHub Actions workflow runs the existing `scripts/run_smoke_test.sh` path, then verifies:
+
+- the C++ executable was created
+- the smoke-study summary contains exactly one `N = 16`, `Re = 100` case
+- at least one convergence-history CSV was generated
+
+This is a fast build-and-execution check. It does not claim that the full 36-case study is rerun on every commit.
+
 ## Repository structure
 
 ```text
@@ -147,7 +152,7 @@ postprocess/   Python plotting scripts
 assets/        selected figures used in the README
 docs/          methodology, running notes, validation, and results
 results/       generated outputs
-.github/       smoke-test workflow
+.github/       build-and-smoke GitHub Actions workflow
 ```
 
 ## Requirements
