@@ -1,0 +1,23 @@
+# Build artifacts
+bin/
+*.o
+*.out
+*.exe
+
+# Crash dumps and temporary files
+core
+core.*
+*.tmp
+*.swp
+
+# Python cache and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
