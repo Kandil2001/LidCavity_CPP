@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-"$ROOT_DIR/scripts/build.sh"
+cd "$ROOT_DIR"
+bash "$ROOT_DIR/scripts/build.sh"
 
 # Converged higher-Reynolds-number representative case.
 "$ROOT_DIR/bin/lid_cavity" \
