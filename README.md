@@ -1,216 +1,223 @@
 # Lid-Driven Cavity Flow Solver in C++
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Status-Completed-brightgreen.svg" alt="Completed">
+  <img src="https://img.shields.io/badge/Status-Phase%202%20verified-brightgreen.svg" alt="Phase 2 verified">
   <img src="https://img.shields.io/badge/C%2B%2B-17-blue.svg" alt="C++17">
-  <img src="https://img.shields.io/badge/Build-GCC%208%2B-brightgreen.svg" alt="GCC 8 and newer">
-  <img src="https://img.shields.io/badge/Python-post--processing-green.svg" alt="Python post-processing">
+  <img src="https://img.shields.io/badge/Grid-staggered%20MAC-blueviolet.svg" alt="Staggered MAC grid">
   <a href="https://github.com/Kandil2001/LidCavity_CPP/actions/workflows/ci.yml">
-    <img src="https://github.com/Kandil2001/LidCavity_CPP/actions/workflows/ci.yml/badge.svg" alt="C++ build and smoke test">
+    <img src="https://github.com/Kandil2001/LidCavity_CPP/actions/workflows/ci.yml/badge.svg" alt="Build and smoke test">
+  </a>
+  <a href="https://github.com/Kandil2001/LidCavity_CPP/actions/workflows/verification.yml">
+    <img src="https://github.com/Kandil2001/LidCavity_CPP/actions/workflows/verification.yml/badge.svg" alt="Numerical verification">
   </a>
   <img src="https://img.shields.io/badge/License-MIT-lightgrey.svg" alt="MIT License">
-  <a href="https://kandil2001.github.io/projects/lid-cavity-cpp.html">
-    <img src="https://img.shields.io/badge/Portfolio-Case%20Study-2ea44f.svg" alt="Portfolio case study">
-  </a>
 </p>
 
-A completed C++17 implementation and parameter study of the two-dimensional lid-driven cavity benchmark.
+A serial C++17 solver for the two-dimensional incompressible lid-driven cavity benchmark.
 
-This repository is the serial C++ component of a larger CFD comparison project. It solves the same benchmark used by the MATLAB and multi-language implementations so that numerical behavior, result quality, code structure, and runtime can be compared consistently.
+The production solver uses a staggered Marker-and-Cell arrangement, a pseudo-transient projection method, compatible pressure-gradient and divergence operators, and convergence-aware termination. The repository also contains manufactured Poisson verification, discrete-operator tests, sanitizer builds, Ghia centerline comparisons, and configurable parameter studies.
 
-The repository is an educational solver and benchmark study, not a production CFD package.
+## What is verified
 
-## What the code does
+The current Phase 2 regression set has been exercised with:
 
-The solver runs the incompressible lid-driven cavity problem on a structured Cartesian grid. The top wall moves, the other walls are fixed, and the flow develops the characteristic cavity recirculation.
+- the canonical `N=32`, `Re=100`, upwind, RBSOR case;
+- all six `N=32` combinations at `Re=100`, `400`, and `1000` with upwind and central convection using RBSOR;
+- the `N=16`, `32`, and `64`, `Re=100`, central, RBSOR grid sequence;
+- RBGS/RBSOR manufactured Poisson tests;
+- the compatibility test between the selected divergence, gradient, and Laplacian operators;
+- GCC and Clang builds in Debug and Release configurations;
+- AddressSanitizer and UndefinedBehaviorSanitizer checks.
 
-Implemented features:
+The canonical strict case converges automatically rather than stopping at a configured iteration limit.
 
-- serial C++17 solver
-- collocated Cartesian grid
-- pseudo-transient pressure-correction method
-- upwind and central convection schemes
-- red-black Gauss-Seidel and red-black SOR pressure solvers
-- CSV output for fields, residuals, and study summaries
-- Python scripts for plotting fields, residuals, validation, and runtime summaries
-- GitHub Actions build, smoke execution, and output verification
-- portable filesystem linking for modern compilers and GCC 8 HPC nodes
+## Numerical method
 
-The completed study contains 36 configured cases:
+The solver advances the nondimensional incompressible Navier–Stokes equations using:
 
-```text
-3 meshes × 3 Reynolds numbers × 2 schemes × 2 pressure solvers
-```
+1. a staggered MAC grid;
+2. an explicit pseudo-time momentum predictor;
+3. upwind or central convection differencing;
+4. a pressure-correction Poisson equation;
+5. RBGS or RBSOR pressure iteration;
+6. velocity correction using pressure gradients located consistently with the staggered velocity components;
+7. convergence checks based on velocity updates, local divergence, global mass balance, and pressure convergence.
 
-## Representative result
+Velocity components are stored on cell faces and pressure is stored at cell centers. Cell-centered velocity values are reconstructed for CSV output and post-processing.
 
-The case shown below uses:
+## Convergence contract
 
-```text
-N = 128
-Re = 1000
-scheme = central
-pressure solver = RBSOR
-implementation = serial_cpp
-```
+A production case is reported as `converged` only when all of the following remain satisfied for the configured number of consecutive iterations:
 
-| Streamlines | Velocity magnitude |
-|---|---|
-| ![Streamlines](assets/figures/re1000_streamlines.svg) | ![Velocity magnitude](assets/figures/re1000_speed.svg) |
+- dimensionless velocity-update `Linf` residual;
+- dimensionless divergence `Linf` residual;
+- dimensionless divergence `L2` residual;
+- global boundary mass imbalance;
+- successful pressure-Poisson convergence.
 
-## Validation
+Possible terminal states include:
 
-The numerical profiles are compared with the classical Ghia et al. lid-driven cavity data:
+- `converged`
+- `max_iterations`
+- `pressure_not_converged`
+- `stagnated`
+- `diverged`
+- `non_finite`
 
-- `u(y)` on the vertical centerline `x = 0.5`
-- `v(x)` on the horizontal centerline `y = 0.5`
+Use `--strict` when a script or CI job must fail if any requested case does not converge.
 
-| Ghia u comparison | Ghia v comparison |
-|---|---|
-| ![Ghia u validation](assets/figures/re1000_ghia_u.svg) | ![Ghia v validation](assets/figures/re1000_ghia_v.svg) |
+## Quick start
 
-For each case, the code reports `L2` and `Linf` errors against the benchmark points.
-
-The refined-grid central + RBSOR cases are:
-
-| Re | Case | N | Scheme | Pressure solver | Ghia `u` L2 | Ghia `v` L2 | Runtime [s] |
-|---:|---:|---:|---|---|---:|---:|---:|
-| 100 | 28 | 128 | central | RBSOR | 0.0031 | 0.0041 | 441.7 |
-| 400 | 32 | 128 | central | RBSOR | 0.0539 | 0.0652 | 527.6 |
-| 1000 | 36 | 128 | central | RBSOR | 0.1102 | 0.1109 | 647.6 |
-
-Study observations:
-
-- all 36 configured cases executed
-- 22 cases met the selected Ghia error thresholds
-- all 12 cases with `N = 128` met those thresholds
-- central differencing produced the best refined-grid agreement
-- RBSOR produced similar validation errors to RBGS with lower pressure-solver cost
-
-![Ghia error summary](assets/figures/study_ghia_error.svg)
-
-![Pressure solver comparison](assets/figures/study_pressure_solver_iterations.svg)
-
-The selected Ghia limits are comparison thresholds, not a formal verification or grid-independence study.
-
-## Convergence interpretation
-
-All full-study cases reached the configured maximum outer-iteration limit. Therefore:
-
-- an executed case is not automatically a converged case
-- the reported runtime is the cost of the configured run
-- the Ghia error thresholds describe profile agreement, not residual convergence
-- the high-Reynolds-number cases require additional convergence tuning
-
-This distinction is important when comparing the results with other solver implementations.
-
-## Numerical workflow
-
-The solver advances the nondimensional incompressible Navier-Stokes equations in pseudo-time. Each outer iteration predicts velocity, solves the pressure-correction equation, corrects velocity and pressure, reapplies wall boundary conditions, and records residual information.
-
-More details are available in [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md).
-
-## Running the project
-
-On Linux, WSL, or a cluster:
+On Linux, WSL, or a Linux HPC node:
 
 ```bash
-bash scripts/run_smoke_test.sh   # compile and run a tiny check
-bash scripts/run_single.sh       # N=128, Re=1000 example
-bash scripts/run_quick.sh        # reduced study
-bash scripts/run_medium.sh       # medium study
+bash scripts/run_single.sh
+```
+
+This builds the solver and runs the canonical strict case:
+
+```text
+N = 32
+Re = 100
+scheme = upwind
+pressure solver = RBSOR
+```
+
+A successful run ends with `status=converged` and writes CSV files to `results/data/`.
+
+## Available runs
+
+```bash
+bash scripts/run_smoke_test.sh   # compilation and output check only
+bash scripts/run_single.sh       # canonical converged regression
+bash scripts/run_quick.sh        # four fast Re=100 cases
+bash scripts/run_medium.sh       # six N=32 cases at Re=100/400/1000
+bash scripts/run_grid.sh         # N=16/32/64 grid sequence at Re=100
+bash scripts/run_re1000.sh       # converged N=32, Re=1000 central case
 bash scripts/run_full.sh         # complete 36-case configuration
 ```
 
-The build script compiles the source to an object file, links normally on current compilers, and retries with `-lstdc++fs` only when an older GCC toolchain requires it. The same command therefore works on modern Linux systems and on GCC 8-based cluster nodes.
+The full mode includes RBGS and grids up to `N=128`; it is intended for a workstation or HPC node.
 
-Generate the plots with:
+## Direct command-line use
 
 ```bash
-bash scripts/plot_results.sh
+bash scripts/build.sh
+
+bin/lid_cavity \
+  --single \
+  --N 32 \
+  --Re 100 \
+  --scheme upwind \
+  --pressure RBSOR \
+  --strict
 ```
 
-Outputs are written to:
+Important numerical options include:
 
 ```text
-results/data/       CSV output files
-results/figures/    generated plots
+--maxIter
+--poisson-maxIter
+--tol-velocity
+--tol-divergence
+--tol-divergence-l2
+--poisson-tol
+--alpha-u
+--alpha-p
+--cfl
+--dt-max
+--min-iterations
+--consecutive-passes
 ```
 
-## Stromboli smoke test — 20 July 2026
+Run `bin/lid_cavity --help` for the complete interface.
 
-The repository was compiled and executed successfully on the Stromboli HPC cluster with GCC 8.5.0 after adding the portable filesystem-link fallback.
+## CMake and tests
 
-The smoke configuration was intentionally tiny:
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
 
-| Setting | Value |
-|---|---:|
-| Grid | `N = 16` |
-| Reynolds number | `100` |
-| Convection scheme | upwind |
-| Pressure solver | RBGS |
-| Outer iterations | `20` |
-| Runtime | approximately `0.01 s` |
+The CTest suite includes:
 
-The smoke run reached the configured `maxIter` limit and did **not** meet the Ghia validation thresholds. That is expected for this deliberately short case. Its purpose is only to verify compilation, execution, argument handling, and CSV output—not numerical convergence.
+- discrete operator verification;
+- manufactured Poisson verification and grid refinement;
+- convergence-state logic;
+- the canonical production-solver regression.
 
-The archived log and generated smoke-test data are stored in [`results/stromboli_2026-07-20`](results/stromboli_2026-07-20).
+For sanitizer checks:
 
-## Continuous integration
+```bash
+cmake -S . -B build/sanitized \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DLIDCAVITY_ENABLE_SANITIZERS=ON
+cmake --build build/sanitized --parallel
+ctest --test-dir build/sanitized --output-on-failure
+```
 
-The GitHub Actions workflow runs the existing `scripts/run_smoke_test.sh` path, then verifies:
+## Output files
 
-- the C++ executable was created
-- the smoke-study summary contains exactly one `N = 16`, `Re = 100` case
-- at least one convergence-history CSV was generated
+Each case writes:
 
-This is a fast build-and-execution check. It does not claim that the full 36-case study is rerun or numerically validated on every commit.
+```text
+results/data/study_summary_<mode>.csv
+results/data/case_<id>_..._history.csv
+results/data/case_<id>_..._fields.csv
+```
+
+The summary separates:
+
+- execution status;
+- iterative convergence;
+- pressure convergence;
+- divergence metrics;
+- runtime;
+- Ghia benchmark agreement.
+
+The history file stores iteration-by-iteration convergence information. The field file contains cell-center coordinates, velocity, pressure, speed, and vorticity.
+
+## Ghia benchmark comparison
+
+For `Re=100`, `400`, and `1000`, the solver compares:
+
+- horizontal velocity `u(y)` on the vertical centerline;
+- vertical velocity `v(x)` on the horizontal centerline.
+
+The code reports `L2` and `Linf` errors. These are reference-benchmark comparisons, not experimental validation.
 
 ## Repository structure
 
 ```text
-src/                                   C++ solver
-scripts/                               build, run, plot, and clean scripts
-postprocess/                           Python plotting scripts
-assets/                                selected README figures
-docs/                                  methodology, running notes, validation, and results
-results/data/                          full-study CSV output
-results/figures/                       full-study generated plots
-results/stromboli_2026-07-20/          archived HPC smoke test
-.github/                               build-and-smoke GitHub Actions workflow
+src/lid_cavity.cpp              production staggered-grid solver
+include/lidcavity/              reusable verification interfaces
+src/verification/               operator, Poisson, and convergence components
+tests/                          CTest verification programs
+scripts/                        build and run helpers
+postprocess/                    Python plotting scripts
+docs/                           method and verification notes
+results/data/                   generated CSV output
+.github/workflows/              smoke and numerical-verification CI
 ```
-
-## Requirements
-
-Solver:
-
-```text
-g++ with C++17 support
-```
-
-Post-processing:
-
-```bash
-python3 -m pip install -r requirements.txt
-```
-
-WSL is recommended on Windows because the scripts use a Linux-style terminal workflow.
 
 ## Scope and limitations
 
-This completed project records the implemented solver and study as they were configured. Known numerical limitations include:
+This is an educational CFD and numerical-verification project, not a production CFD package.
 
-- collocated grid without Rhie-Chow interpolation
-- no multigrid pressure solver
-- configured maximum-iteration termination in the full study
-- high-Reynolds-number cases that need stronger convergence control
-- no formal grid-convergence or uncertainty study
+Current limitations include:
 
-The natural next research step is to build a stricter verification and convergence protocol around these documented limitations.
+- serial CPU execution only;
+- explicit pseudo-time momentum advancement;
+- no multigrid pressure solver;
+- no formal experimental validation;
+- the exhaustive 36-case study can be computationally expensive, especially with RBGS and `N=128`.
+
+Parallel C++, MPI, OpenMP, CUDA, MATLAB, and Python comparisons belong to the separate solver-comparison project and are intentionally not developed in this repository.
 
 ## Reference
 
-Ghia, U., Ghia, K. N., & Shin, C. T. (1982). *High-Re solutions for incompressible flow using the Navier-Stokes equations and a multigrid method*. Journal of Computational Physics, 48(3), 387-411.
+Ghia, U., Ghia, K. N., & Shin, C. T. (1982). *High-Re solutions for incompressible flow using the Navier–Stokes equations and a multigrid method*. Journal of Computational Physics, 48(3), 387–411.
 
 ## Author
 
