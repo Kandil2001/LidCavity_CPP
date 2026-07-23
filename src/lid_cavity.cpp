@@ -1,926 +1,1177 @@
 #include <algorithm>
 #include <chrono>
-#include <cctype>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
-
 constexpr double PI = 3.141592653589793238462643383279502884;
 
-struct Matrix {
-    int n{};
-    std::vector<double> a;
+struct Field {
+    int rows{};
+    int cols{};
+    std::vector<double> values;
 
-    Matrix() = default;
-    explicit Matrix(int n_, double value = 0.0) : n(n_), a(static_cast<size_t>(n_) * n_, value) {}
+    Field() = default;
+    Field(int r, int c, double value = 0.0)
+        : rows(r), cols(c), values(static_cast<std::size_t>(r) * static_cast<std::size_t>(c), value) {}
 
-    double& operator()(int i, int j) { return a[static_cast<size_t>(i) * n + j]; }
-    double operator()(int i, int j) const { return a[static_cast<size_t>(i) * n + j]; }
+    double& operator()(int i, int j) {
+        return values[static_cast<std::size_t>(i) * static_cast<std::size_t>(cols) + static_cast<std::size_t>(j)];
+    }
+    double operator()(int i, int j) const {
+        return values[static_cast<std::size_t>(i) * static_cast<std::size_t>(cols) + static_cast<std::size_t>(j)];
+    }
 };
 
 struct Config {
-    double U_lid = 1.0;
-    double L = 1.0;
+    double lid_velocity = 1.0;
+    double length = 1.0;
 
-    int maxIter = 4000;
-    int maxIter_N128_bonus = 3000;
-    int maxIter_Re1000_bonus = 3000;
-    int maxIter_central_bonus = 1500;
+    int max_iterations = 30000;
+    int minimum_iterations = 200;
+    int consecutive_passes = 20;
+    int maximum_pressure_failures = 3;
 
-    double tol_mass = 1e-7;
-    double tol_divergence = 2e-3;
-    double tol_velocity = 5e-7;
+    double velocity_tolerance = 1e-8;
+    double divergence_linf_tolerance = 1e-9;
+    double divergence_l2_tolerance = 2e-10;
     double diverged_limit = 1e6;
 
-    double cfl = 0.25;
-    double dt_max = 0.0025;
-    double dt_min = 1e-6;
+    double cfl = 0.60;
+    double dt_max = 0.01;
+    double dt_min = 1e-8;
+    double momentum_relaxation = 0.90;
+    double pressure_relaxation = 1.0;
 
-    double alpha_u = 0.55;
-    double alpha_p = 0.20;
+    int poisson_max_iterations = 5000;
+    int poisson_check_every = 20;
+    double poisson_absolute_tolerance = 1e-10;
+    double poisson_relative_tolerance = 1e-9;
+    double sor_omega = 0.0;
 
-    int poisson_maxIter = 2500;
-    double poisson_tol_abs = 1e-8;
-    double poisson_tol_rel = 1e-4;
-    int poisson_check_every = 25;
-
-    std::string sor_omega = "auto";
-    double sor_omega_min = 1.15;
-    double sor_omega_max = 1.90;
-
-    std::vector<int> meshes = {32, 64, 128};
-    std::vector<int> re_list = {100, 400, 1000};
-    std::vector<std::string> schemes = {"upwind", "central"};
-    std::vector<std::string> pressure_solvers = {"RBGS", "RBSOR"};
-    std::vector<std::string> implementations = {"serial_cpp"};
-
-    double validation_u_L2_limit_Re100 = 0.030;
-    double validation_v_L2_limit_Re100 = 0.030;
-    double validation_u_L2_limit_Re400 = 0.090;
-    double validation_v_L2_limit_Re400 = 0.120;
-    double validation_u_L2_limit_Re1000 = 0.160;
-    double validation_v_L2_limit_Re1000 = 0.180;
+    int stagnation_window = 1500;
+    double stagnation_minimum_reduction = 0.005;
 
     bool save_fields = true;
-    std::string results_dir = "results";
-    std::string data_dir = "results/data";
+    bool strict_exit = false;
+    std::string data_directory = "results/data";
 };
 
 struct PoissonInfo {
-    int iter = 0;
-    bool converged = false;
-    double final_true_residual = std::numeric_limits<double>::infinity();
-    double final_relative_residual = std::numeric_limits<double>::infinity();
-    double final_change = std::numeric_limits<double>::infinity();
-    double omega = 1.0;
-    std::vector<double> residual_history;
-    std::vector<double> change_history;
-};
-
-struct Result {
-    int N = 0;
-    int Re = 0;
-    std::string scheme;
-    std::string pressure_solver;
-    std::string implementation;
-
-    std::vector<double> x, y;
-    Matrix u, v, p, speed, vorticity;
-
-    std::vector<double> Ru, Rv, Rc_mass, Rc_div, dt, poisson_relative_residual;
-    std::vector<int> poisson_iters;
-    std::vector<bool> poisson_converged;
-
     int iterations = 0;
-    int localMaxIter = 0;
-    double runtime = 0.0;
-    std::string status = "maxIter";
-    double final_Ru = 0.0;
-    double final_Rv = 0.0;
-    double final_Rc_mass = 0.0;
-    double final_Rc_div = 0.0;
-    double avg_poisson_iters = 0.0;
-    double avg_poisson_relative_residual = 0.0;
-    double pressure_saturation_ratio = 0.0;
-    int stagnation_counter = 0;
+    bool converged = false;
+    double absolute_residual = std::numeric_limits<double>::infinity();
+    double relative_residual = std::numeric_limits<double>::infinity();
+    double omega = 1.0;
 };
 
-struct GhiaData {
-    int Re = 0;
-    std::vector<double> y_u, u, x_v, v;
+struct Residuals {
+    double velocity_update_linf = 0.0;
+    double divergence_linf = 0.0;
+    double divergence_l2 = 0.0;
+    double global_mass_imbalance = 0.0;
 };
 
-struct Metrics {
+struct GhiaMetrics {
     bool available = false;
-    bool pass = false;
-    double u_L2 = std::numeric_limits<double>::quiet_NaN();
-    double v_L2 = std::numeric_limits<double>::quiet_NaN();
-    double u_Linf = std::numeric_limits<double>::quiet_NaN();
-    double v_Linf = std::numeric_limits<double>::quiet_NaN();
+    bool passed = false;
+    double u_l2 = std::numeric_limits<double>::quiet_NaN();
+    double v_l2 = std::numeric_limits<double>::quiet_NaN();
+    double u_linf = std::numeric_limits<double>::quiet_NaN();
+    double v_linf = std::numeric_limits<double>::quiet_NaN();
     double u_limit = std::numeric_limits<double>::quiet_NaN();
     double v_limit = std::numeric_limits<double>::quiet_NaN();
 };
 
-static std::string lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
-    return s;
+struct Result {
+    int case_id = 0;
+    int cells = 0;
+    int reynolds = 0;
+    std::string scheme;
+    std::string pressure_solver;
+    std::string status = "max_iterations";
+    std::string quality = "needs_improvement";
+
+    int iterations = 0;
+    int local_max_iterations = 0;
+    int failed_pressure_solves = 0;
+    int consecutive_pass_count = 0;
+    double runtime_seconds = 0.0;
+
+    Field u_face;
+    Field v_face;
+    Field pressure;
+    Field u_center;
+    Field v_center;
+    Field speed;
+    Field vorticity;
+    std::vector<double> x;
+    std::vector<double> y;
+
+    std::vector<double> velocity_history;
+    std::vector<double> divergence_linf_history;
+    std::vector<double> divergence_l2_history;
+    std::vector<double> mass_history;
+    std::vector<double> dt_history;
+    std::vector<double> poisson_relative_history;
+    std::vector<int> poisson_iteration_history;
+    std::vector<bool> poisson_converged_history;
+
+    Residuals final_residuals;
+    double average_poisson_iterations = 0.0;
+    double average_poisson_relative_residual = 0.0;
+    double pressure_saturation_ratio = 0.0;
+    GhiaMetrics ghia;
+};
+
+struct InitialState {
+    bool available = false;
+    Field u_face;
+    Field v_face;
+    Field pressure;
+};
+
+struct GhiaData {
+    std::vector<double> y_u;
+    std::vector<double> u;
+    std::vector<double> x_v;
+    std::vector<double> v;
+};
+
+static std::string lower(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
 }
 
-static std::string upper(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
-    return s;
+static std::string upper(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::toupper(c));
+    });
+    return value;
 }
 
-static std::string normalize_implementation(std::string s) {
-    s = lower(s);
-    // MATLAB has two implementations: vectorized and loop. This C++ package
-    // intentionally contains one honest serial loop kernel. For convenience,
-    // MATLAB labels are accepted as aliases, but CSV output uses serial_cpp.
-    if (s == "serial" || s == "serial_cpp" || s == "cpp" || s == "loop" || s == "vectorized") {
-        return "serial_cpp";
+static double maximum_absolute(const Field& field) {
+    double result = 0.0;
+    for (const double value : field.values) {
+        result = std::max(result, std::abs(value));
     }
-    throw std::runtime_error("Unknown implementation: " + s + " (use serial_cpp)");
+    return result;
 }
 
-static double max_abs(const Matrix& m) {
-    double r = 0.0;
-    for (double v : m.a) r = std::max(r, std::abs(v));
-    return r;
+static bool all_finite(const Field& field) {
+    return std::all_of(field.values.begin(), field.values.end(), [](double value) {
+        return std::isfinite(value);
+    });
 }
 
-static double mean_all(const Matrix& m) {
-    if (m.a.empty()) return 0.0;
-    return std::accumulate(m.a.begin(), m.a.end(), 0.0) / static_cast<double>(m.a.size());
-}
-
-static bool all_finite(const Matrix& m) {
-    for (double x : m.a) {
-        if (!std::isfinite(x)) return false;
+static void remove_mean(Field& field) {
+    if (field.values.empty()) {
+        return;
     }
-    return true;
-}
-
-static void apply_lid_bc(Matrix& u, Matrix& v, double U_lid) {
-    const int N = u.n;
-    for (int j = 0; j < N; ++j) {
-        u(0, j) = 0.0;         // bottom wall
-        u(N - 1, j) = U_lid;   // moving lid
-    }
-    for (int i = 0; i < N; ++i) {
-        u(i, 0) = 0.0;         // left wall; also sets top-left corner to zero
-        u(i, N - 1) = 0.0;     // right wall; also sets top-right corner to zero
-    }
-
-    for (int j = 0; j < N; ++j) {
-        v(0, j) = 0.0;
-        v(N - 1, j) = 0.0;
-    }
-    for (int i = 0; i < N; ++i) {
-        v(i, 0) = 0.0;
-        v(i, N - 1) = 0.0;
+    const double mean = std::accumulate(field.values.begin(), field.values.end(), 0.0)
+                      / static_cast<double>(field.values.size());
+    for (double& value : field.values) {
+        value -= mean;
     }
 }
 
-static void apply_pressure_bc(Matrix& p) {
-    const int N = p.n;
-    for (int i = 0; i < N; ++i) {
-        p(i, 0) = p(i, 1);
-        p(i, N - 1) = p(i, N - 2);
+static double u_with_wall_ghost(const Field& u, int i, int j, int cells, double lid_velocity) {
+    if (i < 0) {
+        return -u(0, j);
     }
-    for (int j = 0; j < N; ++j) {
-        p(0, j) = p(1, j);
-        p(N - 1, j) = p(N - 2, j);
+    if (i >= cells) {
+        return 2.0 * lid_velocity - u(cells - 1, j);
     }
-    p(0, 0) = 0.0;
+    return u(i, j);
 }
 
-static double compute_dt(const Matrix& u, const Matrix& v, double dx, double dy, double nu, const Config& cfg) {
-    const double max_vel = std::max({max_abs(u), max_abs(v), cfg.U_lid, 1e-12});
-    const double h = std::min(dx, dy);
-    const double dt_conv = cfg.cfl * h / max_vel;
-    const double dt_diff = (nu > 0.0) ? 0.25 * h * h / nu : std::numeric_limits<double>::infinity();
-    return std::min({dt_conv, dt_diff, cfg.dt_max});
+static double v_with_wall_ghost(const Field& v, int i, int j, int cells) {
+    if (j < 0) {
+        return -v(i, 0);
+    }
+    if (j >= cells) {
+        return -v(i, cells - 1);
+    }
+    return v(i, j);
 }
 
-static Matrix divergence_field(const Matrix& u, const Matrix& v, double dx, double dy) {
-    const int N = u.n;
-    Matrix div(N, 0.0);
-    for (int i = 1; i < N - 1; ++i) {
-        for (int j = 1; j < N - 1; ++j) {
-            div(i, j) = (u(i, j + 1) - u(i, j - 1)) / (2.0 * dx)
-                      + (v(i + 1, j) - v(i - 1, j)) / (2.0 * dy);
+static Field divergence(const Field& u, const Field& v, double dx, double dy, int cells) {
+    Field result(cells, cells, 0.0);
+    for (int i = 0; i < cells; ++i) {
+        for (int j = 0; j < cells; ++j) {
+            result(i, j) = (u(i, j + 1) - u(i, j)) / dx
+                         + (v(i + 1, j) - v(i, j)) / dy;
         }
     }
-    return div;
+    return result;
 }
 
-static Matrix compute_vorticity(const Matrix& u, const Matrix& v, double dx, double dy) {
-    const int N = u.n;
-    Matrix omega(N, 0.0);
-    for (int i = 1; i < N - 1; ++i) {
-        for (int j = 1; j < N - 1; ++j) {
-            omega(i, j) = (v(i, j + 1) - v(i, j - 1)) / (2.0 * dx)
-                        - (u(i + 1, j) - u(i - 1, j)) / (2.0 * dy);
-        }
-    }
-    return omega;
-}
-
-static std::tuple<Matrix, Matrix, double> momentum_predictor(
-    const Matrix& u, const Matrix& v, const Matrix& p,
-    int Re, const std::string& scheme_in, const Config& cfg
-) {
-    const int N = u.n;
-    const double dx = cfg.L / static_cast<double>(N - 1);
-    const double dy = dx;
-    const double nu = cfg.U_lid * cfg.L / static_cast<double>(Re);
-    const double dt = compute_dt(u, v, dx, dy, nu, cfg);
-    const std::string scheme = lower(scheme_in);
-
-    Matrix u_star = u;
-    Matrix v_star = v;
-
-    for (int i = 1; i < N - 1; ++i) {
-        for (int j = 1; j < N - 1; ++j) {
-            const double uC = u(i, j);
-            const double vC = v(i, j);
-
-            const double lap_u = (u(i, j + 1) - 2.0 * u(i, j) + u(i, j - 1)) / (dx * dx)
-                               + (u(i + 1, j) - 2.0 * u(i, j) + u(i - 1, j)) / (dy * dy);
-            const double lap_v = (v(i, j + 1) - 2.0 * v(i, j) + v(i, j - 1)) / (dx * dx)
-                               + (v(i + 1, j) - 2.0 * v(i, j) + v(i - 1, j)) / (dy * dy);
-
-            double du_dx, du_dy, dv_dx, dv_dy;
-
-            if (scheme == "central") {
-                du_dx = (u(i, j + 1) - u(i, j - 1)) / (2.0 * dx);
-                du_dy = (u(i + 1, j) - u(i - 1, j)) / (2.0 * dy);
-                dv_dx = (v(i, j + 1) - v(i, j - 1)) / (2.0 * dx);
-                dv_dy = (v(i + 1, j) - v(i - 1, j)) / (2.0 * dy);
-            } else if (scheme == "upwind") {
-                if (uC >= 0.0) {
-                    du_dx = (u(i, j) - u(i, j - 1)) / dx;
-                    dv_dx = (v(i, j) - v(i, j - 1)) / dx;
-                } else {
-                    du_dx = (u(i, j + 1) - u(i, j)) / dx;
-                    dv_dx = (v(i, j + 1) - v(i, j)) / dx;
-                }
-
-                if (vC >= 0.0) {
-                    du_dy = (u(i, j) - u(i - 1, j)) / dy;
-                    dv_dy = (v(i, j) - v(i - 1, j)) / dy;
-                } else {
-                    du_dy = (u(i + 1, j) - u(i, j)) / dy;
-                    dv_dy = (v(i + 1, j) - v(i, j)) / dy;
-                }
-            } else {
-                throw std::runtime_error("Unknown convection scheme: " + scheme_in);
+static double poisson_residual(const Field& pressure, const Field& rhs, double h) {
+    const int cells = pressure.rows;
+    double maximum = 0.0;
+    for (int i = 0; i < cells; ++i) {
+        for (int j = 0; j < cells; ++j) {
+            double laplacian = 0.0;
+            if (i > 0) {
+                laplacian += pressure(i - 1, j) - pressure(i, j);
             }
-
-            const double conv_u = uC * du_dx + vC * du_dy;
-            const double conv_v = uC * dv_dx + vC * dv_dy;
-            const double dp_dx = (p(i, j + 1) - p(i, j - 1)) / (2.0 * dx);
-            const double dp_dy = (p(i + 1, j) - p(i - 1, j)) / (2.0 * dy);
-
-            const double u_pred = u(i, j) + dt * (-conv_u - dp_dx + nu * lap_u);
-            const double v_pred = v(i, j) + dt * (-conv_v - dp_dy + nu * lap_v);
-
-            u_star(i, j) = (1.0 - cfg.alpha_u) * u(i, j) + cfg.alpha_u * u_pred;
-            v_star(i, j) = (1.0 - cfg.alpha_u) * v(i, j) + cfg.alpha_u * v_pred;
+            if (i + 1 < cells) {
+                laplacian += pressure(i + 1, j) - pressure(i, j);
+            }
+            if (j > 0) {
+                laplacian += pressure(i, j - 1) - pressure(i, j);
+            }
+            if (j + 1 < cells) {
+                laplacian += pressure(i, j + 1) - pressure(i, j);
+            }
+            laplacian /= h * h;
+            maximum = std::max(maximum, std::abs(laplacian - rhs(i, j)));
         }
     }
-
-    apply_lid_bc(u_star, v_star, cfg.U_lid);
-    return {u_star, v_star, dt};
+    return maximum;
 }
 
-static double poisson_true_residual(const Matrix& phi, const Matrix& rhs, double dx, double dy) {
-    const int N = phi.n;
-    double res = 0.0;
-    for (int i = 1; i < N - 1; ++i) {
-        for (int j = 1; j < N - 1; ++j) {
-            const double lap = (phi(i, j + 1) - 2.0 * phi(i, j) + phi(i, j - 1)) / (dx * dx)
-                             + (phi(i + 1, j) - 2.0 * phi(i, j) + phi(i - 1, j)) / (dy * dy);
-            res = std::max(res, std::abs(lap - rhs(i, j)));
-        }
-    }
-    return res;
-}
-
-static std::tuple<Matrix, PoissonInfo> pressure_poisson(
-    const Matrix& rhs, double dx, double dy, const std::string& solver_type_in, const Config& cfg
+static std::pair<Field, PoissonInfo> solve_pressure_poisson(
+    Field rhs,
+    double h,
+    const std::string& solver_name,
+    const Config& config
 ) {
-    const int N = rhs.n;
-    Matrix phi(N, 0.0);
-    Matrix rhs2 = rhs;
-    const std::string solver_type = upper(solver_type_in);
-
-    double interior_sum = 0.0;
-    int count = 0;
-    for (int i = 1; i < N - 1; ++i) {
-        for (int j = 1; j < N - 1; ++j) {
-            interior_sum += rhs2(i, j);
-            ++count;
-        }
-    }
-    const double interior_mean = (count > 0) ? interior_sum / static_cast<double>(count) : 0.0;
-    for (int i = 1; i < N - 1; ++i) {
-        for (int j = 1; j < N - 1; ++j) {
-            rhs2(i, j) -= interior_mean;
-        }
+    const int cells = rhs.rows;
+    const std::string method = upper(solver_name);
+    const bool use_sor = method == "RBSOR";
+    if (!use_sor && method != "RBGS") {
+        throw std::runtime_error("Pressure solver must be RBGS or RBSOR");
     }
 
-    const double den = 2.0 * (dx * dx + dy * dy);
-    double omega;
-    if (lower(cfg.sor_omega) == "auto") {
-        omega = 2.0 / (1.0 + std::sin(PI / static_cast<double>(N - 1)));
-        omega = std::min(std::max(omega, cfg.sor_omega_min), cfg.sor_omega_max);
-    } else {
-        omega = std::stod(cfg.sor_omega);
+    const double rhs_mean = std::accumulate(rhs.values.begin(), rhs.values.end(), 0.0)
+                          / static_cast<double>(rhs.values.size());
+    double rhs_norm = 0.0;
+    for (double& value : rhs.values) {
+        value -= rhs_mean;
+        rhs_norm = std::max(rhs_norm, std::abs(value));
     }
+    rhs_norm = std::max(rhs_norm, 1e-30);
 
-    double rhs_norm = 1.0;
-    for (int i = 1; i < N - 1; ++i) {
-        for (int j = 1; j < N - 1; ++j) {
-            rhs_norm = std::max(rhs_norm, std::abs(rhs2(i, j)));
-        }
+    Field pressure(cells, cells, 0.0);
+    double omega = use_sor ? config.sor_omega : 1.0;
+    if (use_sor && omega <= 0.0) {
+        omega = 2.0 / (1.0 + std::sin(PI / static_cast<double>(cells)));
+        omega = std::clamp(omega, 1.0, 1.95);
     }
 
     PoissonInfo info;
     info.omega = omega;
-    info.residual_history.assign(static_cast<size_t>(cfg.poisson_maxIter), 0.0);
-    info.change_history.assign(static_cast<size_t>(cfg.poisson_maxIter), 0.0);
 
-    bool converged = false;
-    double final_res = std::numeric_limits<double>::infinity();
-    double final_change = std::numeric_limits<double>::infinity();
-    int it = 0;
-
-    for (it = 1; it <= cfg.poisson_maxIter; ++it) {
-        Matrix phi_old = phi;
-
-        if (solver_type == "JACOBI") {
-            Matrix phi_new = phi;
-            for (int i = 1; i < N - 1; ++i) {
-                for (int j = 1; j < N - 1; ++j) {
-                    phi_new(i, j) = ((phi(i + 1, j) + phi(i - 1, j)) * dy * dy
-                                   + (phi(i, j + 1) + phi(i, j - 1)) * dx * dx
-                                   - rhs2(i, j) * dx * dx * dy * dy) / den;
-                }
-            }
-            phi = std::move(phi_new);
-            apply_pressure_bc(phi);
-        } else if (solver_type == "RBGS" || solver_type == "RBSOR") {
-            for (int color = 0; color <= 1; ++color) {
-                for (int i = 1; i < N - 1; ++i) {
-                    for (int j = 1; j < N - 1; ++j) {
-                        const bool is_red = ((i + 1) + (j + 1)) % 2 == 0; // MATLAB i+j parity
-                        if ((color == 0 && !is_red) || (color == 1 && is_red)) continue;
-
-                        const double candidate = ((phi(i + 1, j) + phi(i - 1, j)) * dy * dy
-                                                + (phi(i, j + 1) + phi(i, j - 1)) * dx * dx
-                                                - rhs2(i, j) * dx * dx * dy * dy) / den;
-                        if (solver_type == "RBSOR") {
-                            phi(i, j) = (1.0 - omega) * phi(i, j) + omega * candidate;
-                        } else {
-                            phi(i, j) = candidate;
-                        }
+    for (int iteration = 1; iteration <= config.poisson_max_iterations; ++iteration) {
+        for (int color = 0; color < 2; ++color) {
+            for (int i = 0; i < cells; ++i) {
+                for (int j = 0; j < cells; ++j) {
+                    if (((i + j) & 1) != color) {
+                        continue;
                     }
+
+                    double neighbor_sum = 0.0;
+                    int neighbor_count = 0;
+                    if (i > 0) {
+                        neighbor_sum += pressure(i - 1, j);
+                        ++neighbor_count;
+                    }
+                    if (i + 1 < cells) {
+                        neighbor_sum += pressure(i + 1, j);
+                        ++neighbor_count;
+                    }
+                    if (j > 0) {
+                        neighbor_sum += pressure(i, j - 1);
+                        ++neighbor_count;
+                    }
+                    if (j + 1 < cells) {
+                        neighbor_sum += pressure(i, j + 1);
+                        ++neighbor_count;
+                    }
+
+                    const double candidate = (neighbor_sum - rhs(i, j) * h * h)
+                                           / static_cast<double>(neighbor_count);
+                    pressure(i, j) = use_sor
+                        ? (1.0 - omega) * pressure(i, j) + omega * candidate
+                        : candidate;
                 }
-                apply_pressure_bc(phi);
-            }
-        } else {
-            throw std::runtime_error("Unknown pressure solver: " + solver_type_in);
-        }
-
-        final_change = 0.0;
-        for (size_t k = 0; k < phi.a.size(); ++k) {
-            final_change = std::max(final_change, std::abs(phi.a[k] - phi_old.a[k]));
-        }
-        info.change_history[static_cast<size_t>(it - 1)] = final_change;
-
-        if ((it % cfg.poisson_check_every) == 0 || it == 1 || it == cfg.poisson_maxIter) {
-            final_res = poisson_true_residual(phi, rhs2, dx, dy);
-            const double rel_res = final_res / rhs_norm;
-            info.residual_history[static_cast<size_t>(it - 1)] = rel_res;
-            if (final_res < cfg.poisson_tol_abs || rel_res < cfg.poisson_tol_rel) {
-                converged = true;
-                break;
             }
         }
+
+        if (iteration % 50 == 0) {
+            remove_mean(pressure);
+        }
+
+        if (iteration == 1
+            || iteration % config.poisson_check_every == 0
+            || iteration == config.poisson_max_iterations) {
+            const double absolute = poisson_residual(pressure, rhs, h);
+            const double relative = absolute / rhs_norm;
+            info.iterations = iteration;
+            info.absolute_residual = absolute;
+            info.relative_residual = relative;
+            if (absolute <= config.poisson_absolute_tolerance
+                || relative <= config.poisson_relative_tolerance) {
+                info.converged = true;
+                remove_mean(pressure);
+                return {pressure, info};
+            }
+        }
     }
 
-    if (it > cfg.poisson_maxIter) {
-        it = cfg.poisson_maxIter;
-    }
-
-    if (!converged) {
-        final_res = poisson_true_residual(phi, rhs2, dx, dy);
-    }
-
-    info.iter = it;
-    info.converged = converged;
-    info.final_true_residual = final_res;
-    info.final_relative_residual = final_res / rhs_norm;
-    info.final_change = final_change;
-    info.residual_history.resize(static_cast<size_t>(it));
-    info.change_history.resize(static_cast<size_t>(it));
-    return {phi, info};
+    remove_mean(pressure);
+    return {pressure, info};
 }
 
-static std::tuple<double, double, double, double> velocity_residuals(
-    const Matrix& u, const Matrix& v, const Matrix& u_old, const Matrix& v_old,
-    double dx, double dy, double U, double L
+static double compute_time_step(
+    const Field& u,
+    const Field& v,
+    double h,
+    double viscosity,
+    const Config& config
 ) {
-    double Ru = 0.0;
-    double Rv = 0.0;
-    for (size_t k = 0; k < u.a.size(); ++k) {
-        Ru = std::max(Ru, std::abs(u.a[k] - u_old.a[k]));
-        Rv = std::max(Rv, std::abs(v.a[k] - v_old.a[k]));
-    }
-
-    Matrix div = divergence_field(u, v, dx, dy);
-    const double Rc_div = max_abs(div);
-    const double scale = std::max(U * L, std::numeric_limits<double>::epsilon());
-    const double Rc_mass = Rc_div * dx * dy / scale;
-    return {Ru, Rv, Rc_mass, Rc_div};
+    const double maximum_velocity = std::max({
+        maximum_absolute(u),
+        maximum_absolute(v),
+        config.lid_velocity,
+        1e-12
+    });
+    const double convection_limit = config.cfl * h / maximum_velocity;
+    const double diffusion_limit = 0.24 * h * h / std::max(viscosity, 1e-30);
+    return std::clamp(
+        std::min({convection_limit, diffusion_limit, config.dt_max}),
+        config.dt_min,
+        config.dt_max
+    );
 }
 
-static Result solve_lid_cavity(int N, int Re, std::string scheme, std::string pressure_solver, std::string implementation, const Config& cfg) {
-    scheme = lower(scheme);
-    pressure_solver = upper(pressure_solver);
-    implementation = normalize_implementation(implementation);
+static std::tuple<Field, Field, double> predict_velocity(
+    const Field& u,
+    const Field& v,
+    const Field& pressure,
+    int reynolds,
+    const std::string& scheme_name,
+    const Config& config
+) {
+    const int cells = pressure.rows;
+    const double h = config.length / static_cast<double>(cells);
+    const double viscosity = config.lid_velocity * config.length / static_cast<double>(reynolds);
+    const double dt = compute_time_step(u, v, h, viscosity, config);
+    const std::string scheme = lower(scheme_name);
 
-    const double dx = cfg.L / static_cast<double>(N - 1);
-    const double dy = dx;
+    Field u_star = u;
+    Field v_star = v;
 
-    int localMaxIter = cfg.maxIter;
-    if (N >= 128) localMaxIter += cfg.maxIter_N128_bonus;
-    if (Re >= 1000) localMaxIter += cfg.maxIter_Re1000_bonus;
-    if (scheme == "central") localMaxIter += cfg.maxIter_central_bonus;
+    for (int i = 0; i < cells; ++i) {
+        for (int j = 1; j < cells; ++j) {
+            const double u_center = u(i, j);
+            const double v_at_u = 0.25 * (
+                v(i, j - 1) + v(i + 1, j - 1)
+                + v(i, j) + v(i + 1, j)
+            );
 
-    Matrix u(N, 0.0), v(N, 0.0), p(N, 0.0);
-    apply_lid_bc(u, v, cfg.U_lid);
+            const double u_west = u(i, j - 1);
+            const double u_east = u(i, j + 1);
+            const double u_south = u_with_wall_ghost(u, i - 1, j, cells, config.lid_velocity);
+            const double u_north = u_with_wall_ghost(u, i + 1, j, cells, config.lid_velocity);
 
-    Result result;
-    result.N = N;
-    result.Re = Re;
-    result.scheme = scheme;
-    result.pressure_solver = pressure_solver;
-    result.implementation = implementation;
-    result.localMaxIter = localMaxIter;
-
-    result.Ru.reserve(localMaxIter);
-    result.Rv.reserve(localMaxIter);
-    result.Rc_mass.reserve(localMaxIter);
-    result.Rc_div.reserve(localMaxIter);
-    result.dt.reserve(localMaxIter);
-    result.poisson_iters.reserve(localMaxIter);
-    result.poisson_relative_residual.reserve(localMaxIter);
-    result.poisson_converged.reserve(localMaxIter);
-
-    std::string status = "maxIter";
-    int stagnation_counter = 0;
-    double prev_mass = std::numeric_limits<double>::infinity();
-    int iter = 0;
-
-    const auto t0 = std::chrono::steady_clock::now();
-
-    for (iter = 1; iter <= localMaxIter; ++iter) {
-        Matrix u_old = u;
-        Matrix v_old = v;
-
-        auto [u_star, v_star, dt] = momentum_predictor(u, v, p, Re, scheme, cfg);
-        dt = std::max(dt, cfg.dt_min);
-
-        Matrix div_star = divergence_field(u_star, v_star, dx, dy);
-        Matrix rhs(N, 0.0);
-        for (int i = 0; i < N; ++i) {
-            for (int j = 0; j < N; ++j) {
-                rhs(i, j) = div_star(i, j) / dt;
+            double du_dx = 0.0;
+            double du_dy = 0.0;
+            if (scheme == "central") {
+                du_dx = (u_east - u_west) / (2.0 * h);
+                du_dy = (u_north - u_south) / (2.0 * h);
+            } else if (scheme == "upwind") {
+                du_dx = u_center >= 0.0
+                    ? (u_center - u_west) / h
+                    : (u_east - u_center) / h;
+                du_dy = v_at_u >= 0.0
+                    ? (u_center - u_south) / h
+                    : (u_north - u_center) / h;
+            } else {
+                throw std::runtime_error("Convection scheme must be upwind or central");
             }
+
+            const double laplacian = (
+                u_east - 2.0 * u_center + u_west
+                + u_north - 2.0 * u_center + u_south
+            ) / (h * h);
+            const double pressure_gradient = (pressure(i, j) - pressure(i, j - 1)) / h;
+
+            u_star(i, j) = u_center + config.momentum_relaxation * dt * (
+                -u_center * du_dx - v_at_u * du_dy
+                - pressure_gradient + viscosity * laplacian
+            );
         }
+    }
 
-        auto [p_prime, pinfo] = pressure_poisson(rhs, dx, dy, pressure_solver, cfg);
+    for (int i = 1; i < cells; ++i) {
+        for (int j = 0; j < cells; ++j) {
+            const double v_center = v(i, j);
+            const double u_at_v = 0.25 * (
+                u(i - 1, j) + u(i - 1, j + 1)
+                + u(i, j) + u(i, j + 1)
+            );
 
-        u = u_star;
-        v = v_star;
-        for (int i = 1; i < N - 1; ++i) {
-            for (int j = 1; j < N - 1; ++j) {
-                const double dpdx = (p_prime(i, j + 1) - p_prime(i, j - 1)) / (2.0 * dx);
-                const double dpdy = (p_prime(i + 1, j) - p_prime(i - 1, j)) / (2.0 * dy);
-                u(i, j) = u_star(i, j) - dt * dpdx;
-                v(i, j) = v_star(i, j) - dt * dpdy;
+            const double v_south = v(i - 1, j);
+            const double v_north = v(i + 1, j);
+            const double v_west = v_with_wall_ghost(v, i, j - 1, cells);
+            const double v_east = v_with_wall_ghost(v, i, j + 1, cells);
+
+            double dv_dx = 0.0;
+            double dv_dy = 0.0;
+            if (scheme == "central") {
+                dv_dx = (v_east - v_west) / (2.0 * h);
+                dv_dy = (v_north - v_south) / (2.0 * h);
+            } else if (scheme == "upwind") {
+                dv_dx = u_at_v >= 0.0
+                    ? (v_center - v_west) / h
+                    : (v_east - v_center) / h;
+                dv_dy = v_center >= 0.0
+                    ? (v_center - v_south) / h
+                    : (v_north - v_center) / h;
             }
-        }
 
-        for (size_t k = 0; k < p.a.size(); ++k) {
-            p.a[k] += cfg.alpha_p * p_prime.a[k];
-        }
-        const double p_mean = mean_all(p);
-        for (double& val : p.a) val -= p_mean;
+            const double laplacian = (
+                v_east - 2.0 * v_center + v_west
+                + v_north - 2.0 * v_center + v_south
+            ) / (h * h);
+            const double pressure_gradient = (pressure(i, j) - pressure(i - 1, j)) / h;
 
-        apply_lid_bc(u, v, cfg.U_lid);
-
-        auto [Ru, Rv, Rc_mass, Rc_div] = velocity_residuals(u, v, u_old, v_old, dx, dy, cfg.U_lid, cfg.L);
-        result.Ru.push_back(Ru);
-        result.Rv.push_back(Rv);
-        result.Rc_mass.push_back(Rc_mass);
-        result.Rc_div.push_back(Rc_div);
-        result.dt.push_back(dt);
-        result.poisson_iters.push_back(pinfo.iter);
-        result.poisson_relative_residual.push_back(pinfo.final_relative_residual);
-        result.poisson_converged.push_back(pinfo.converged);
-
-        if (!all_finite(u) || !all_finite(v) || !all_finite(p) || std::max({Ru, Rv, Rc_div}) > cfg.diverged_limit) {
-            status = "diverged";
-            break;
-        }
-
-        if (Rc_mass > 0.995 * prev_mass) {
-            ++stagnation_counter;
-        } else {
-            stagnation_counter = 0;
-        }
-        prev_mass = Rc_mass;
-
-        if (Rc_mass < cfg.tol_mass && std::max(Ru, Rv) < cfg.tol_velocity) {
-            status = "converged";
-            break;
+            v_star(i, j) = v_center + config.momentum_relaxation * dt * (
+                -u_at_v * dv_dx - v_center * dv_dy
+                - pressure_gradient + viscosity * laplacian
+            );
         }
     }
 
-    if (iter > localMaxIter) {
-        iter = localMaxIter;
-    }
-
-    const auto t1 = std::chrono::steady_clock::now();
-    result.runtime = std::chrono::duration<double>(t1 - t0).count();
-
-    result.iterations = iter;
-    result.status = status;
-    result.stagnation_counter = stagnation_counter;
-
-    result.x.resize(N);
-    result.y.resize(N);
-    for (int k = 0; k < N; ++k) {
-        result.x[k] = static_cast<double>(k) * cfg.L / static_cast<double>(N - 1);
-        result.y[k] = result.x[k];
-    }
-
-    result.u = std::move(u);
-    result.v = std::move(v);
-    result.p = std::move(p);
-    result.speed = Matrix(N, 0.0);
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < N; ++j) {
-            result.speed(i, j) = std::sqrt(result.u(i, j) * result.u(i, j) + result.v(i, j) * result.v(i, j));
-        }
-    }
-    result.vorticity = compute_vorticity(result.u, result.v, dx, dy);
-
-    result.final_Ru = result.Ru.empty() ? 0.0 : result.Ru.back();
-    result.final_Rv = result.Rv.empty() ? 0.0 : result.Rv.back();
-    result.final_Rc_mass = result.Rc_mass.empty() ? 0.0 : result.Rc_mass.back();
-    result.final_Rc_div = result.Rc_div.empty() ? 0.0 : result.Rc_div.back();
-
-    if (!result.poisson_iters.empty()) {
-        result.avg_poisson_iters = std::accumulate(result.poisson_iters.begin(), result.poisson_iters.end(), 0.0)
-                                 / static_cast<double>(result.poisson_iters.size());
-        result.avg_poisson_relative_residual = std::accumulate(result.poisson_relative_residual.begin(), result.poisson_relative_residual.end(), 0.0)
-                                            / static_cast<double>(result.poisson_relative_residual.size());
-        int saturated = 0;
-        for (int pi : result.poisson_iters) if (pi >= cfg.poisson_maxIter) ++saturated;
-        result.pressure_saturation_ratio = static_cast<double>(saturated) / static_cast<double>(result.poisson_iters.size());
-    }
-
-    return result;
+    return {u_star, v_star, dt};
 }
 
-static GhiaData ghia_data(int Re) {
-    GhiaData d;
-    d.Re = Re;
-    if (Re == 100) {
-        d.y_u = {1.0000,0.9766,0.9688,0.9609,0.9531,0.8516,0.7344,0.6172,0.5000,0.4531,0.2813,0.1719,0.1016,0.0703,0.0625,0.0547,0.0000};
-        d.u   = {1.0000,0.84123,0.78871,0.73722,0.68717,0.23151,0.00332,-0.13641,-0.20581,-0.21090,-0.15662,-0.10150,-0.06434,-0.04775,-0.04192,-0.03717,0.0000};
-        d.x_v = {1.0000,0.9688,0.9609,0.9531,0.9453,0.9063,0.8594,0.8047,0.5000,0.2344,0.2266,0.1563,0.0938,0.0781,0.0703,0.0625,0.0000};
-        d.v   = {0.0000,-0.05906,-0.07391,-0.08864,-0.10313,-0.16914,-0.22445,-0.24533,0.05454,0.17527,0.17507,0.16077,0.12317,0.10890,0.10091,0.09233,0.0000};
-    } else if (Re == 400) {
-        d.y_u = {1.0000,0.9766,0.9688,0.9609,0.9531,0.8516,0.7344,0.6172,0.5000,0.4531,0.2813,0.1719,0.1016,0.0703,0.0625,0.0547,0.0000};
-        d.u   = {1.0000,0.75837,0.68439,0.61756,0.55892,0.29093,0.16256,0.02135,-0.11477,-0.17119,-0.32726,-0.24299,-0.14612,-0.10338,-0.09266,-0.08186,0.0000};
-        d.x_v = {1.0000,0.9688,0.9609,0.9531,0.9453,0.9063,0.8594,0.8047,0.5000,0.2344,0.2266,0.1563,0.0938,0.0781,0.0703,0.0625,0.0000};
-        d.v   = {0.0000,-0.12146,-0.15663,-0.19254,-0.22847,-0.23827,-0.44993,-0.38598,0.05186,0.30174,0.30203,0.28124,0.22965,0.20920,0.19713,0.18360,0.0000};
-    } else if (Re == 1000) {
-        d.y_u = {1.0000,0.9766,0.9688,0.9609,0.9531,0.8516,0.7344,0.6172,0.5000,0.4531,0.2813,0.1719,0.1016,0.0703,0.0625,0.0547,0.0000};
-        d.u   = {1.0000,0.65928,0.57492,0.51117,0.46604,0.33304,0.18719,0.05702,-0.06080,-0.10648,-0.27805,-0.38289,-0.29730,-0.22220,-0.20196,-0.18109,0.0000};
-        d.x_v = {1.0000,0.9688,0.9609,0.9531,0.9453,0.9063,0.8594,0.8047,0.5000,0.2344,0.2266,0.1563,0.0938,0.0781,0.0703,0.0625,0.0000};
-        d.v   = {0.0000,-0.21388,-0.27669,-0.33714,-0.39188,-0.51550,-0.42665,-0.31966,0.02526,0.32235,0.33075,0.37095,0.32627,0.30353,0.29012,0.27485,0.0000};
+static Residuals calculate_residuals(
+    const Field& u,
+    const Field& v,
+    const Field& old_u,
+    const Field& old_v,
+    double h,
+    const Config& config
+) {
+    Residuals residuals;
+    for (std::size_t k = 0; k < u.values.size(); ++k) {
+        residuals.velocity_update_linf = std::max(
+            residuals.velocity_update_linf,
+            std::abs(u.values[k] - old_u.values[k]) / config.lid_velocity
+        );
     }
-    return d;
+    for (std::size_t k = 0; k < v.values.size(); ++k) {
+        residuals.velocity_update_linf = std::max(
+            residuals.velocity_update_linf,
+            std::abs(v.values[k] - old_v.values[k]) / config.lid_velocity
+        );
+    }
+
+    const Field div = divergence(u, v, h, h, u.rows);
+    double square_sum = 0.0;
+    for (const double value : div.values) {
+        const double dimensionless = value / (config.lid_velocity / config.length);
+        residuals.divergence_linf = std::max(residuals.divergence_linf, std::abs(dimensionless));
+        square_sum += dimensionless * dimensionless;
+    }
+    residuals.divergence_l2 = std::sqrt(square_sum / static_cast<double>(div.values.size()));
+
+    double boundary_flux = 0.0;
+    const int cells = u.rows;
+    for (int i = 0; i < cells; ++i) {
+        boundary_flux += (u(i, cells) - u(i, 0)) * h;
+    }
+    for (int j = 0; j < cells; ++j) {
+        boundary_flux += (v(cells, j) - v(0, j)) * h;
+    }
+    residuals.global_mass_imbalance = std::abs(boundary_flux)
+                                    / (config.lid_velocity * config.length);
+    return residuals;
 }
 
-static double interp_linear(const std::vector<double>& x, const std::vector<double>& y, double q) {
-    if (x.empty()) return std::numeric_limits<double>::quiet_NaN();
-    if (q <= x.front()) return y.front();
-    if (q >= x.back()) return y.back();
-    const auto it = std::upper_bound(x.begin(), x.end(), q);
-    const size_t k = static_cast<size_t>(std::distance(x.begin(), it));
-    const double x0 = x[k - 1], x1 = x[k];
-    const double y0 = y[k - 1], y1 = y[k];
-    const double t = (q - x0) / (x1 - x0);
-    return y0 + t * (y1 - y0);
+static void build_cell_center_fields(Result& result, const Config& config) {
+    const int cells = result.cells;
+    const double h = config.length / static_cast<double>(cells);
+    result.u_center = Field(cells, cells, 0.0);
+    result.v_center = Field(cells, cells, 0.0);
+    result.speed = Field(cells, cells, 0.0);
+    result.vorticity = Field(cells, cells, 0.0);
+    result.x.resize(static_cast<std::size_t>(cells));
+    result.y.resize(static_cast<std::size_t>(cells));
+
+    for (int k = 0; k < cells; ++k) {
+        result.x[static_cast<std::size_t>(k)] = (static_cast<double>(k) + 0.5) * h;
+        result.y[static_cast<std::size_t>(k)] = (static_cast<double>(k) + 0.5) * h;
+    }
+
+    for (int i = 0; i < cells; ++i) {
+        for (int j = 0; j < cells; ++j) {
+            result.u_center(i, j) = 0.5 * (result.u_face(i, j) + result.u_face(i, j + 1));
+            result.v_center(i, j) = 0.5 * (result.v_face(i, j) + result.v_face(i + 1, j));
+            result.speed(i, j) = std::hypot(result.u_center(i, j), result.v_center(i, j));
+        }
+    }
+
+    for (int i = 1; i + 1 < cells; ++i) {
+        for (int j = 1; j + 1 < cells; ++j) {
+            const double dv_dx = (result.v_center(i, j + 1) - result.v_center(i, j - 1)) / (2.0 * h);
+            const double du_dy = (result.u_center(i + 1, j) - result.u_center(i - 1, j)) / (2.0 * h);
+            result.vorticity(i, j) = dv_dx - du_dy;
+        }
+    }
 }
 
-static Metrics validate_against_ghia(const Result& result, const Config& cfg) {
-    Metrics m;
-    GhiaData d = ghia_data(result.Re);
-    if (d.y_u.empty()) return m;
-    m.available = true;
-
-    const int N = result.N;
-    const int mid = static_cast<int>(std::round((N + 1) / 2.0)) - 1; // MATLAB round((N+1)/2)
-    std::vector<double> u_center(N), v_center(N);
-    for (int i = 0; i < N; ++i) u_center[i] = result.u(i, mid);
-    for (int j = 0; j < N; ++j) v_center[j] = result.v(mid, j);
-
-    double sum_u2 = 0.0, sum_v2 = 0.0;
-    double linf_u = 0.0, linf_v = 0.0;
-    for (size_t k = 0; k < d.y_u.size(); ++k) {
-        const double un = interp_linear(result.y, u_center, d.y_u[k]);
-        const double e = un - d.u[k];
-        sum_u2 += e * e;
-        linf_u = std::max(linf_u, std::abs(e));
+static double interpolate(const std::vector<double>& coordinates, const std::vector<double>& values, double query) {
+    if (coordinates.empty()) {
+        return std::numeric_limits<double>::quiet_NaN();
     }
-    for (size_t k = 0; k < d.x_v.size(); ++k) {
-        const double vn = interp_linear(result.x, v_center, d.x_v[k]);
-        const double e = vn - d.v[k];
-        sum_v2 += e * e;
-        linf_v = std::max(linf_v, std::abs(e));
+    if (query <= coordinates.front()) {
+        return values.front();
     }
+    if (query >= coordinates.back()) {
+        return values.back();
+    }
+    const auto upper_it = std::upper_bound(coordinates.begin(), coordinates.end(), query);
+    const std::size_t upper_index = static_cast<std::size_t>(std::distance(coordinates.begin(), upper_it));
+    const std::size_t lower_index = upper_index - 1;
+    const double fraction = (query - coordinates[lower_index])
+                          / (coordinates[upper_index] - coordinates[lower_index]);
+    return values[lower_index] + fraction * (values[upper_index] - values[lower_index]);
+}
 
-    m.u_L2 = std::sqrt(sum_u2 / static_cast<double>(d.y_u.size()));
-    m.v_L2 = std::sqrt(sum_v2 / static_cast<double>(d.x_v.size()));
-    m.u_Linf = linf_u;
-    m.v_Linf = linf_v;
+static GhiaData ghia_data(int reynolds) {
+    GhiaData data;
+    data.y_u = {1.0000,0.9766,0.9688,0.9609,0.9531,0.8516,0.7344,0.6172,0.5000,0.4531,0.2813,0.1719,0.1016,0.0703,0.0625,0.0547,0.0000};
+    data.x_v = {1.0000,0.9688,0.9609,0.9531,0.9453,0.9063,0.8594,0.8047,0.5000,0.2344,0.2266,0.1563,0.0938,0.0781,0.0703,0.0625,0.0000};
+    if (reynolds == 100) {
+        data.u = {1.0000,0.84123,0.78871,0.73722,0.68717,0.23151,0.00332,-0.13641,-0.20581,-0.21090,-0.15662,-0.10150,-0.06434,-0.04775,-0.04192,-0.03717,0.0000};
+        data.v = {0.0000,-0.05906,-0.07391,-0.08864,-0.10313,-0.16914,-0.22445,-0.24533,0.05454,0.17527,0.17507,0.16077,0.12317,0.10890,0.10091,0.09233,0.0000};
+    } else if (reynolds == 400) {
+        data.u = {1.0000,0.75837,0.68439,0.61756,0.55892,0.29093,0.16256,0.02135,-0.11477,-0.17119,-0.32726,-0.24299,-0.14612,-0.10338,-0.09266,-0.08186,0.0000};
+        data.v = {0.0000,-0.12146,-0.15663,-0.19254,-0.22847,-0.23827,-0.44993,-0.38598,0.05186,0.30174,0.30203,0.28124,0.22965,0.20920,0.19713,0.18360,0.0000};
+    } else if (reynolds == 1000) {
+        data.u = {1.0000,0.65928,0.57492,0.51117,0.46604,0.33304,0.18719,0.05702,-0.06080,-0.10648,-0.27805,-0.38289,-0.29730,-0.22220,-0.20196,-0.18109,0.0000};
+        data.v = {0.0000,-0.21388,-0.27669,-0.33714,-0.39188,-0.51550,-0.42665,-0.31966,0.02526,0.32235,0.33075,0.37095,0.32627,0.30353,0.29012,0.27485,0.0000};
+    }
+    return data;
+}
 
-    if (result.Re == 100) {
-        m.u_limit = cfg.validation_u_L2_limit_Re100;
-        m.v_limit = cfg.validation_v_L2_limit_Re100;
-    } else if (result.Re == 400) {
-        m.u_limit = cfg.validation_u_L2_limit_Re400;
-        m.v_limit = cfg.validation_v_L2_limit_Re400;
-    } else if (result.Re == 1000) {
-        m.u_limit = cfg.validation_u_L2_limit_Re1000;
-        m.v_limit = cfg.validation_v_L2_limit_Re1000;
+static GhiaMetrics compare_with_ghia(const Result& result) {
+    GhiaMetrics metrics;
+    const GhiaData reference = ghia_data(result.reynolds);
+    if (reference.u.empty()) {
+        return metrics;
+    }
+    metrics.available = true;
+
+    const int cells = result.cells;
+    const int left = (cells - 1) / 2;
+    const int right = cells / 2;
+    std::vector<double> y_coordinates;
+    std::vector<double> u_profile;
+    std::vector<double> x_coordinates;
+    std::vector<double> v_profile;
+    y_coordinates.reserve(static_cast<std::size_t>(cells + 2));
+    u_profile.reserve(static_cast<std::size_t>(cells + 2));
+    x_coordinates.reserve(static_cast<std::size_t>(cells + 2));
+    v_profile.reserve(static_cast<std::size_t>(cells + 2));
+
+    y_coordinates.push_back(0.0);
+    u_profile.push_back(0.0);
+    for (int i = 0; i < cells; ++i) {
+        y_coordinates.push_back(result.y[static_cast<std::size_t>(i)]);
+        u_profile.push_back(0.5 * (result.u_center(i, left) + result.u_center(i, right)));
+    }
+    y_coordinates.push_back(1.0);
+    u_profile.push_back(1.0);
+
+    x_coordinates.push_back(0.0);
+    v_profile.push_back(0.0);
+    for (int j = 0; j < cells; ++j) {
+        x_coordinates.push_back(result.x[static_cast<std::size_t>(j)]);
+        v_profile.push_back(0.5 * (result.v_center(left, j) + result.v_center(right, j)));
+    }
+    x_coordinates.push_back(1.0);
+    v_profile.push_back(0.0);
+
+    double u_square_sum = 0.0;
+    double v_square_sum = 0.0;
+    for (std::size_t k = 0; k < reference.y_u.size(); ++k) {
+        const double error = interpolate(y_coordinates, u_profile, reference.y_u[k]) - reference.u[k];
+        u_square_sum += error * error;
+        metrics.u_linf = std::isnan(metrics.u_linf) ? std::abs(error) : std::max(metrics.u_linf, std::abs(error));
+    }
+    for (std::size_t k = 0; k < reference.x_v.size(); ++k) {
+        const double error = interpolate(x_coordinates, v_profile, reference.x_v[k]) - reference.v[k];
+        v_square_sum += error * error;
+        metrics.v_linf = std::isnan(metrics.v_linf) ? std::abs(error) : std::max(metrics.v_linf, std::abs(error));
+    }
+    metrics.u_l2 = std::sqrt(u_square_sum / static_cast<double>(reference.y_u.size()));
+    metrics.v_l2 = std::sqrt(v_square_sum / static_cast<double>(reference.x_v.size()));
+
+    if (result.reynolds == 100) {
+        metrics.u_limit = 0.035;
+        metrics.v_limit = 0.035;
+    } else if (result.reynolds == 400) {
+        metrics.u_limit = 0.10;
+        metrics.v_limit = 0.13;
     } else {
-        m.u_limit = std::numeric_limits<double>::infinity();
-        m.v_limit = std::numeric_limits<double>::infinity();
+        metrics.u_limit = 0.18;
+        metrics.v_limit = 0.20;
     }
-    m.pass = (m.u_L2 <= m.u_limit && m.v_L2 <= m.v_limit);
-    return m;
+    metrics.passed = metrics.u_l2 <= metrics.u_limit && metrics.v_l2 <= metrics.v_limit;
+    return metrics;
 }
 
-static std::string quality_label(const Result& result, const Metrics& metrics) {
-    if (result.status == "converged" && metrics.available && metrics.pass) return "converged_validated";
-    if (result.status == "converged" && metrics.available && !metrics.pass) return "converged_not_validated";
-    if (result.status == "converged" && !metrics.available) return "converged_no_benchmark";
-    if (result.status != "converged" && metrics.available && metrics.pass) return "validated_but_not_converged";
+static std::string quality_label(const Result& result) {
+    if (result.status == "converged" && result.ghia.available && result.ghia.passed) {
+        return "converged_benchmark_pass";
+    }
+    if (result.status == "converged" && result.ghia.available) {
+        return "converged_benchmark_needs_improvement";
+    }
+    if (result.status == "converged") {
+        return "converged_no_benchmark";
+    }
+    if (result.ghia.available && result.ghia.passed) {
+        return "benchmark_pass_not_converged";
+    }
     return "needs_improvement";
 }
 
-static void write_field_csv(const Result& r, const std::string& case_name, const Config& cfg) {
-    fs::create_directories(cfg.data_dir);
-    const fs::path path = fs::path(cfg.data_dir) / (case_name + "_fields.csv");
-    std::ofstream out(path);
-    out << std::setprecision(12);
-    out << "i,j,x,y,u,v,p,speed,vorticity\n";
-    for (int i = 0; i < r.N; ++i) {
-        for (int j = 0; j < r.N; ++j) {
-            out << i << ',' << j << ',' << r.x[j] << ',' << r.y[i] << ','
-                << r.u(i, j) << ',' << r.v(i, j) << ',' << r.p(i, j) << ','
-                << r.speed(i, j) << ',' << r.vorticity(i, j) << '\n';
+static Result solve_case(
+    int case_id,
+    int cells,
+    int reynolds,
+    std::string scheme,
+    std::string pressure_solver,
+    const Config& config,
+    const InitialState& initial = {}
+) {
+    scheme = lower(scheme);
+    pressure_solver = upper(pressure_solver);
+    const double h = config.length / static_cast<double>(cells);
+
+    Field u(cells, cells + 1, 0.0);
+    Field v(cells + 1, cells, 0.0);
+    Field pressure(cells, cells, 0.0);
+    if (initial.available
+        && initial.u_face.rows == cells && initial.u_face.cols == cells + 1
+        && initial.v_face.rows == cells + 1 && initial.v_face.cols == cells
+        && initial.pressure.rows == cells && initial.pressure.cols == cells) {
+        u = initial.u_face;
+        v = initial.v_face;
+        pressure = initial.pressure;
+    }
+
+    Result result;
+    result.case_id = case_id;
+    result.cells = cells;
+    result.reynolds = reynolds;
+    result.scheme = scheme;
+    result.pressure_solver = pressure_solver;
+    result.local_max_iterations = config.max_iterations;
+
+    int consecutive_passes = 0;
+    int consecutive_pressure_failures = 0;
+    std::vector<double> stagnation_history;
+    stagnation_history.reserve(static_cast<std::size_t>(config.stagnation_window));
+
+    const auto start = std::chrono::steady_clock::now();
+    for (int iteration = 1; iteration <= config.max_iterations; ++iteration) {
+        const Field old_u = u;
+        const Field old_v = v;
+
+        auto [u_star, v_star, dt] = predict_velocity(
+            u, v, pressure, reynolds, scheme, config
+        );
+
+        Field rhs = divergence(u_star, v_star, h, h, cells);
+        for (double& value : rhs.values) {
+            value /= dt;
         }
-    }
-}
 
-static void write_history_csv(const Result& r, const std::string& case_name, const Config& cfg) {
-    fs::create_directories(cfg.data_dir);
-    const fs::path path = fs::path(cfg.data_dir) / (case_name + "_history.csv");
-    std::ofstream out(path);
-    out << std::setprecision(12);
-    out << "iter,Ru,Rv,Rc_mass,Rc_div,dt,poisson_iters,poisson_relative_residual,poisson_converged\n";
-    for (size_t k = 0; k < r.Ru.size(); ++k) {
-        out << (k + 1) << ',' << r.Ru[k] << ',' << r.Rv[k] << ',' << r.Rc_mass[k] << ',' << r.Rc_div[k]
-            << ',' << r.dt[k] << ',' << r.poisson_iters[k] << ',' << r.poisson_relative_residual[k]
-            << ',' << (r.poisson_converged[k] ? 1 : 0) << '\n';
-    }
-}
+        auto [pressure_correction, poisson] = solve_pressure_poisson(
+            rhs, h, pressure_solver, config
+        );
 
-static void write_summary_header(std::ofstream& out) {
-    out << "CaseID,Implementation,N,Re,Scheme,PressureSolver,Status,Quality,Iterations,LocalMaxIter,"
-        << "FinalRu,FinalRv,FinalRcMass,FinalRcDiv,Runtime_s,AvgPoissonIterations,"
-        << "AvgPoissonRelResidual,PressureSaturationRatio,HasGhia,ValidationPass,"
-        << "Ghia_u_L2,Ghia_v_L2,Ghia_u_Linf,Ghia_v_Linf,Ghia_u_L2_Limit,Ghia_v_L2_Limit\n";
-}
+        if (poisson.converged) {
+            consecutive_pressure_failures = 0;
+        } else {
+            ++consecutive_pressure_failures;
+            ++result.failed_pressure_solves;
+        }
 
-static void write_summary_row(std::ofstream& out, int case_id, const Result& r, const Metrics& m, const std::string& quality) {
-    out << std::setprecision(12);
-    out << case_id << ',' << r.implementation << ',' << r.N << ',' << r.Re << ',' << r.scheme << ',' << r.pressure_solver << ','
-        << r.status << ',' << quality << ',' << r.iterations << ',' << r.localMaxIter << ','
-        << r.final_Ru << ',' << r.final_Rv << ',' << r.final_Rc_mass << ',' << r.final_Rc_div << ',' << r.runtime << ','
-        << r.avg_poisson_iters << ',' << r.avg_poisson_relative_residual << ',' << r.pressure_saturation_ratio << ','
-        << (m.available ? 1 : 0) << ',' << (m.pass ? 1 : 0) << ','
-        << m.u_L2 << ',' << m.v_L2 << ',' << m.u_Linf << ',' << m.v_Linf << ',' << m.u_limit << ',' << m.v_limit << '\n';
-}
+        u = u_star;
+        v = v_star;
+        for (int i = 0; i < cells; ++i) {
+            for (int j = 1; j < cells; ++j) {
+                u(i, j) -= dt * (pressure_correction(i, j) - pressure_correction(i, j - 1)) / h;
+            }
+        }
+        for (int i = 1; i < cells; ++i) {
+            for (int j = 0; j < cells; ++j) {
+                v(i, j) -= dt * (pressure_correction(i, j) - pressure_correction(i - 1, j)) / h;
+            }
+        }
+        for (std::size_t k = 0; k < pressure.values.size(); ++k) {
+            pressure.values[k] += config.pressure_relaxation * pressure_correction.values[k];
+        }
+        remove_mean(pressure);
 
-static void configure_mode(Config& cfg, const std::string& mode) {
-    const std::string m = lower(mode);
-    if (m == "quick") {
-        cfg.meshes = {32, 64};
-        cfg.re_list = {100, 400};
-        cfg.maxIter = 2000;
-        cfg.maxIter_N128_bonus = 0;
-        cfg.maxIter_Re1000_bonus = 0;
-        cfg.maxIter_central_bonus = 500;
-        cfg.poisson_maxIter = 1200;
-    } else if (m == "medium") {
-        cfg.meshes = {32, 64};
-        cfg.re_list = {100, 400, 1000};
-        cfg.maxIter = 3500;
-        cfg.maxIter_N128_bonus = 0;
-        cfg.poisson_maxIter = 1800;
-    } else if (m == "full") {
-        // defaults, equivalent to main.m
-    } else if (m == "single") {
-        cfg.meshes = {64};
-        cfg.re_list = {100};
-        cfg.schemes = {"central"};
-        cfg.pressure_solvers = {"RBGS"};
-        cfg.implementations = {"serial_cpp"};
-    } else if (m == "smoke") {
-        cfg.meshes = {16};
-        cfg.re_list = {100};
-        cfg.schemes = {"upwind"};
-        cfg.pressure_solvers = {"RBGS"};
-        cfg.implementations = {"serial_cpp"};
-        cfg.maxIter = 20;
-        cfg.maxIter_N128_bonus = 0;
-        cfg.maxIter_Re1000_bonus = 0;
-        cfg.maxIter_central_bonus = 0;
-        cfg.poisson_maxIter = 50;
-    } else {
-        throw std::runtime_error("Unknown mode: " + mode + " (use quick, medium, full, single, or smoke)");
-    }
-}
+        const Residuals residuals = calculate_residuals(
+            u, v, old_u, old_v, h, config
+        );
 
-static void print_usage(const char* exe) {
-    std::cout << "Usage:\n"
-              << "  " << exe << " --mode quick|medium|full|single|smoke\n"
-              << "  " << exe << " --single --N 64 --Re 100 --scheme central --pressure RBGS --implementation serial_cpp\n\n"
-              << "Options:\n"
-              << "  --no-fields              Do not write full field CSV files\n"
-              << "  --maxIter VALUE          Override base outer iterations\n"
-              << "  --poisson-maxIter VALUE  Override pressure solver iterations\n"
-              << "\nImplementation note: this C++ package has one serial_cpp solver. MATLAB labels loop/vectorized are accepted as aliases only.\n";
-}
+        result.iterations = iteration;
+        result.final_residuals = residuals;
+        result.velocity_history.push_back(residuals.velocity_update_linf);
+        result.divergence_linf_history.push_back(residuals.divergence_linf);
+        result.divergence_l2_history.push_back(residuals.divergence_l2);
+        result.mass_history.push_back(residuals.global_mass_imbalance);
+        result.dt_history.push_back(dt);
+        result.poisson_iteration_history.push_back(poisson.iterations);
+        result.poisson_relative_history.push_back(poisson.relative_residual);
+        result.poisson_converged_history.push_back(poisson.converged);
 
-int main(int argc, char** argv) {
-    Config cfg;
-    std::string mode = "quick";
-    bool explicit_single = false;
-    int single_N = 64;
-    int single_Re = 100;
-    std::string single_scheme = "central";
-    std::string single_pressure = "RBGS";
-    std::string single_implementation = "serial_cpp";
+        if (!all_finite(u) || !all_finite(v) || !all_finite(pressure)
+            || !std::isfinite(residuals.velocity_update_linf)
+            || !std::isfinite(residuals.divergence_linf)
+            || !std::isfinite(residuals.divergence_l2)) {
+            result.status = "non_finite";
+            break;
+        }
+        if (std::max({
+                residuals.velocity_update_linf,
+                residuals.divergence_linf,
+                residuals.divergence_l2
+            }) > config.diverged_limit) {
+            result.status = "diverged";
+            break;
+        }
+        if (consecutive_pressure_failures >= config.maximum_pressure_failures) {
+            result.status = "pressure_not_converged";
+            break;
+        }
 
-    try {
-        for (int i = 1; i < argc; ++i) {
-            std::string arg = argv[i];
-            auto require_value = [&](const std::string& name) -> std::string {
-                if (i + 1 >= argc) throw std::runtime_error("Missing value for " + name);
-                return argv[++i];
-            };
+        const bool passed = poisson.converged
+            && residuals.velocity_update_linf <= config.velocity_tolerance
+            && residuals.divergence_linf <= config.divergence_linf_tolerance
+            && residuals.divergence_l2 <= config.divergence_l2_tolerance
+            && residuals.global_mass_imbalance <= 1e-12;
 
-            if (arg == "--help" || arg == "-h") {
-                print_usage(argv[0]);
-                return 0;
-            } else if (arg == "--mode") {
-                mode = require_value(arg);
-            } else if (arg == "--single") {
-                explicit_single = true;
-                mode = "single";
-            } else if (arg == "--N") {
-                single_N = std::stoi(require_value(arg));
-                explicit_single = true;
-                mode = "single";
-            } else if (arg == "--Re") {
-                single_Re = std::stoi(require_value(arg));
-                explicit_single = true;
-                mode = "single";
-            } else if (arg == "--scheme") {
-                single_scheme = require_value(arg);
-                explicit_single = true;
-                mode = "single";
-            } else if (arg == "--pressure") {
-                single_pressure = require_value(arg);
-                explicit_single = true;
-                mode = "single";
-            } else if (arg == "--implementation") {
-                single_implementation = require_value(arg);
-                explicit_single = true;
-                mode = "single";
-            } else if (arg == "--no-fields") {
-                cfg.save_fields = false;
-            } else if (arg == "--maxIter") {
-                cfg.maxIter = std::stoi(require_value(arg));
-            } else if (arg == "--poisson-maxIter") {
-                cfg.poisson_maxIter = std::stoi(require_value(arg));
-            } else {
-                throw std::runtime_error("Unknown argument: " + arg);
+        if (iteration >= config.minimum_iterations && passed) {
+            ++consecutive_passes;
+        } else {
+            consecutive_passes = 0;
+        }
+        result.consecutive_pass_count = consecutive_passes;
+        if (consecutive_passes >= config.consecutive_passes) {
+            result.status = "converged";
+            break;
+        }
+
+        stagnation_history.push_back(residuals.velocity_update_linf);
+        if (static_cast<int>(stagnation_history.size()) > config.stagnation_window) {
+            stagnation_history.erase(stagnation_history.begin());
+        }
+        if (iteration > config.minimum_iterations
+            && static_cast<int>(stagnation_history.size()) == config.stagnation_window) {
+            const double first = stagnation_history.front();
+            const double last = stagnation_history.back();
+            const double relative_reduction = (first - last) / std::max(first, 1e-30);
+            if (first > config.velocity_tolerance
+                && relative_reduction < config.stagnation_minimum_reduction) {
+                result.status = "stagnated";
+                break;
             }
         }
 
-        configure_mode(cfg, mode);
-        if (explicit_single) {
-            cfg.meshes = {single_N};
-            cfg.re_list = {single_Re};
-            cfg.schemes = {lower(single_scheme)};
-            cfg.pressure_solvers = {upper(single_pressure)};
-            cfg.implementations = {normalize_implementation(single_implementation)};
+        if (iteration % 1000 == 0) {
+            std::cout << "      iter=" << iteration
+                      << " vel=" << std::scientific << residuals.velocity_update_linf
+                      << " div=" << residuals.divergence_linf
+                      << " p=" << poisson.relative_residual << '\n';
+        }
+    }
+
+    const auto end = std::chrono::steady_clock::now();
+    result.runtime_seconds = std::chrono::duration<double>(end - start).count();
+    result.u_face = std::move(u);
+    result.v_face = std::move(v);
+    result.pressure = std::move(pressure);
+    build_cell_center_fields(result, config);
+    result.ghia = compare_with_ghia(result);
+    result.quality = quality_label(result);
+
+    if (!result.poisson_iteration_history.empty()) {
+        result.average_poisson_iterations = std::accumulate(
+            result.poisson_iteration_history.begin(),
+            result.poisson_iteration_history.end(),
+            0.0
+        ) / static_cast<double>(result.poisson_iteration_history.size());
+        result.average_poisson_relative_residual = std::accumulate(
+            result.poisson_relative_history.begin(),
+            result.poisson_relative_history.end(),
+            0.0
+        ) / static_cast<double>(result.poisson_relative_history.size());
+        int saturated = 0;
+        for (const int pressure_iterations : result.poisson_iteration_history) {
+            if (pressure_iterations >= config.poisson_max_iterations) {
+                ++saturated;
+            }
+        }
+        result.pressure_saturation_ratio = static_cast<double>(saturated)
+                                         / static_cast<double>(result.poisson_iteration_history.size());
+    }
+    return result;
+}
+
+static std::string case_name(const Result& result) {
+    std::ostringstream stream;
+    stream << "case_" << std::setw(3) << std::setfill('0') << result.case_id
+           << "_N" << result.cells
+           << "_Re" << result.reynolds
+           << '_' << result.scheme
+           << '_' << result.pressure_solver
+           << "_serial_cpp";
+    return stream.str();
+}
+
+static void write_history(const Result& result, const Config& config) {
+    const fs::path path = fs::path(config.data_directory) / (case_name(result) + "_history.csv");
+    std::ofstream output(path);
+    output << std::setprecision(12);
+    output << "iter,velocity_update_linf,divergence_linf,divergence_l2,global_mass_imbalance,dt,poisson_iters,poisson_relative_residual,poisson_converged\n";
+    for (std::size_t k = 0; k < result.velocity_history.size(); ++k) {
+        output << (k + 1) << ','
+               << result.velocity_history[k] << ','
+               << result.divergence_linf_history[k] << ','
+               << result.divergence_l2_history[k] << ','
+               << result.mass_history[k] << ','
+               << result.dt_history[k] << ','
+               << result.poisson_iteration_history[k] << ','
+               << result.poisson_relative_history[k] << ','
+               << (result.poisson_converged_history[k] ? 1 : 0) << '\n';
+    }
+}
+
+static void write_fields(const Result& result, const Config& config) {
+    const fs::path path = fs::path(config.data_directory) / (case_name(result) + "_fields.csv");
+    std::ofstream output(path);
+    output << std::setprecision(12);
+    output << "i,j,x,y,u,v,p,speed,vorticity\n";
+    for (int i = 0; i < result.cells; ++i) {
+        for (int j = 0; j < result.cells; ++j) {
+            output << i << ',' << j << ','
+                   << result.x[static_cast<std::size_t>(j)] << ','
+                   << result.y[static_cast<std::size_t>(i)] << ','
+                   << result.u_center(i, j) << ','
+                   << result.v_center(i, j) << ','
+                   << result.pressure(i, j) << ','
+                   << result.speed(i, j) << ','
+                   << result.vorticity(i, j) << '\n';
+        }
+    }
+}
+
+static void write_summary_header(std::ofstream& output) {
+    output << "CaseID,Implementation,N,Re,Scheme,PressureSolver,Status,Quality,Iterations,LocalMaxIter,"
+           << "FinalRu,FinalRv,FinalRcMass,FinalRcDiv,Runtime_s,AvgPoissonIterations,"
+           << "AvgPoissonRelResidual,PressureSaturationRatio,HasGhia,ValidationPass,"
+           << "Ghia_u_L2,Ghia_v_L2,Ghia_u_Linf,Ghia_v_Linf,Ghia_u_L2_Limit,Ghia_v_L2_Limit,"
+           << "FinalVelocityLinf,FinalDivergenceL2,GlobalMassImbalance,FailedPressureSolves,ConsecutivePasses\n";
+}
+
+static void write_summary_row(std::ofstream& output, const Result& result) {
+    output << std::setprecision(12)
+           << result.case_id << ",serial_cpp,"
+           << result.cells << ',' << result.reynolds << ','
+           << result.scheme << ',' << result.pressure_solver << ','
+           << result.status << ',' << result.quality << ','
+           << result.iterations << ',' << result.local_max_iterations << ','
+           << result.final_residuals.velocity_update_linf << ','
+           << result.final_residuals.velocity_update_linf << ','
+           << result.final_residuals.global_mass_imbalance << ','
+           << result.final_residuals.divergence_linf << ','
+           << result.runtime_seconds << ','
+           << result.average_poisson_iterations << ','
+           << result.average_poisson_relative_residual << ','
+           << result.pressure_saturation_ratio << ','
+           << (result.ghia.available ? 1 : 0) << ','
+           << (result.ghia.passed ? 1 : 0) << ','
+           << result.ghia.u_l2 << ',' << result.ghia.v_l2 << ','
+           << result.ghia.u_linf << ',' << result.ghia.v_linf << ','
+           << result.ghia.u_limit << ',' << result.ghia.v_limit << ','
+           << result.final_residuals.velocity_update_linf << ','
+           << result.final_residuals.divergence_l2 << ','
+           << result.final_residuals.global_mass_imbalance << ','
+           << result.failed_pressure_solves << ','
+           << result.consecutive_pass_count << '\n';
+}
+
+static void configure_mode(
+    const std::string& mode,
+    Config& config,
+    std::vector<int>& meshes,
+    std::vector<int>& reynolds_numbers,
+    std::vector<std::string>& schemes,
+    std::vector<std::string>& pressure_solvers
+) {
+    const std::string normalized = lower(mode);
+    if (normalized == "smoke") {
+        meshes = {16};
+        reynolds_numbers = {100};
+        schemes = {"upwind"};
+        pressure_solvers = {"RBGS"};
+        config.max_iterations = 20;
+        config.minimum_iterations = 100;
+        config.poisson_max_iterations = 100;
+        config.save_fields = false;
+    } else if (normalized == "quick") {
+        meshes = {24, 32};
+        reynolds_numbers = {100};
+        schemes = {"upwind", "central"};
+        pressure_solvers = {"RBSOR"};
+        config.velocity_tolerance = 1e-7;
+    } else if (normalized == "medium") {
+        meshes = {32};
+        reynolds_numbers = {100, 400, 1000};
+        schemes = {"upwind", "central"};
+        pressure_solvers = {"RBSOR"};
+        config.velocity_tolerance = 1e-7;
+    } else if (normalized == "grid") {
+        meshes = {16, 32, 64};
+        reynolds_numbers = {100};
+        schemes = {"central"};
+        pressure_solvers = {"RBSOR"};
+        config.velocity_tolerance = 1e-7;
+    } else if (normalized == "full") {
+        meshes = {32, 64, 128};
+        reynolds_numbers = {100, 400, 1000};
+        schemes = {"upwind", "central"};
+        pressure_solvers = {"RBGS", "RBSOR"};
+        config.velocity_tolerance = 1e-7;
+    } else if (normalized != "single") {
+        throw std::runtime_error("Unknown mode: " + mode + " (use smoke, single, quick, medium, grid, or full)");
+    }
+}
+
+static void print_usage(const char* executable) {
+    std::cout
+        << "Usage:\n"
+        << "  " << executable << " --mode smoke|single|quick|medium|grid|full\n"
+        << "  " << executable << " --single --N 32 --Re 100 --scheme upwind --pressure RBSOR\n\n"
+        << "Options:\n"
+        << "  --no-fields                    Skip full field CSV output\n"
+        << "  --strict                       Return a non-zero exit code when a case does not converge\n"
+        << "  --maxIter VALUE                Maximum outer iterations\n"
+        << "  --poisson-maxIter VALUE        Maximum pressure iterations\n"
+        << "  --tol-velocity VALUE           Dimensionless velocity-update tolerance\n"
+        << "  --tol-divergence VALUE         Dimensionless Linf divergence tolerance\n"
+        << "  --tol-divergence-l2 VALUE      Dimensionless L2 divergence tolerance\n"
+        << "  --poisson-tol VALUE            Relative pressure residual tolerance\n"
+        << "  --alpha-u VALUE                Momentum relaxation factor\n"
+        << "  --alpha-p VALUE                Pressure update relaxation factor\n"
+        << "  --cfl VALUE                    Convective CFL limit\n"
+        << "  --dt-max VALUE                 Maximum pseudo-time step\n"
+        << "  --min-iterations VALUE         Minimum outer iterations\n"
+        << "  --consecutive-passes VALUE     Required consecutive converged iterations\n";
+}
+
+int main(int argc, char** argv) {
+    Config config;
+    std::string mode = "quick";
+    bool explicit_single = false;
+    int single_cells = 32;
+    int single_reynolds = 100;
+    std::string single_scheme = "upwind";
+    std::string single_pressure = "RBSOR";
+
+    try {
+        for (int i = 1; i < argc; ++i) {
+            const std::string argument = argv[i];
+            auto require_value = [&]() -> std::string {
+                if (i + 1 >= argc) {
+                    throw std::runtime_error("Missing value for " + argument);
+                }
+                return argv[++i];
+            };
+
+            if (argument == "--help" || argument == "-h") {
+                print_usage(argv[0]);
+                return 0;
+            } else if (argument == "--mode") {
+                mode = require_value();
+            } else if (argument == "--single") {
+                mode = "single";
+                explicit_single = true;
+            } else if (argument == "--N") {
+                single_cells = std::stoi(require_value());
+                mode = "single";
+                explicit_single = true;
+            } else if (argument == "--Re") {
+                single_reynolds = std::stoi(require_value());
+                mode = "single";
+                explicit_single = true;
+            } else if (argument == "--scheme") {
+                single_scheme = require_value();
+                mode = "single";
+                explicit_single = true;
+            } else if (argument == "--pressure") {
+                single_pressure = require_value();
+                mode = "single";
+                explicit_single = true;
+            } else if (argument == "--implementation") {
+                (void)require_value();
+            } else if (argument == "--no-fields") {
+                config.save_fields = false;
+            } else if (argument == "--strict") {
+                config.strict_exit = true;
+            } else if (argument == "--maxIter") {
+                config.max_iterations = std::stoi(require_value());
+            } else if (argument == "--poisson-maxIter") {
+                config.poisson_max_iterations = std::stoi(require_value());
+            } else if (argument == "--tol-velocity") {
+                config.velocity_tolerance = std::stod(require_value());
+            } else if (argument == "--tol-divergence") {
+                config.divergence_linf_tolerance = std::stod(require_value());
+            } else if (argument == "--tol-divergence-l2") {
+                config.divergence_l2_tolerance = std::stod(require_value());
+            } else if (argument == "--poisson-tol") {
+                config.poisson_relative_tolerance = std::stod(require_value());
+            } else if (argument == "--alpha-u") {
+                config.momentum_relaxation = std::stod(require_value());
+            } else if (argument == "--alpha-p") {
+                config.pressure_relaxation = std::stod(require_value());
+            } else if (argument == "--cfl") {
+                config.cfl = std::stod(require_value());
+            } else if (argument == "--dt-max") {
+                config.dt_max = std::stod(require_value());
+            } else if (argument == "--min-iterations") {
+                config.minimum_iterations = std::stoi(require_value());
+            } else if (argument == "--consecutive-passes") {
+                config.consecutive_passes = std::stoi(require_value());
+            } else {
+                throw std::runtime_error("Unknown argument: " + argument);
+            }
         }
 
-        fs::create_directories(cfg.data_dir);
-        const fs::path summary_path = fs::path(cfg.data_dir) / ("study_summary_" + lower(mode) + ".csv");
+        std::vector<int> meshes;
+        std::vector<int> reynolds_numbers;
+        std::vector<std::string> schemes;
+        std::vector<std::string> pressure_solvers;
+        configure_mode(mode, config, meshes, reynolds_numbers, schemes, pressure_solvers);
+        if (explicit_single || lower(mode) == "single") {
+            meshes = {single_cells};
+            reynolds_numbers = {single_reynolds};
+            schemes = {lower(single_scheme)};
+            pressure_solvers = {upper(single_pressure)};
+        }
+
+        fs::create_directories(config.data_directory);
+        const fs::path summary_path = fs::path(config.data_directory) / ("study_summary_" + lower(mode) + ".csv");
         std::ofstream summary(summary_path);
         write_summary_header(summary);
 
-        const int nCases = static_cast<int>(cfg.meshes.size() * cfg.re_list.size() * cfg.schemes.size()
-                         * cfg.pressure_solvers.size() * cfg.implementations.size());
-        std::cout << "\nLID-DRIVEN CAVITY C++ SOLVER\n";
-        std::cout << "Mode: " << mode << "\n";
-        std::cout << "Total simulations: " << nCases << "\n";
-        std::cout << "Summary: " << summary_path.string() << "\n\n";
+        const int number_of_cases = static_cast<int>(
+            meshes.size() * reynolds_numbers.size() * schemes.size() * pressure_solvers.size()
+        );
+        std::cout << "\nLID-DRIVEN CAVITY C++ PHASE 2 SOLVER\n"
+                  << "Mode: " << mode << "\n"
+                  << "Total simulations: " << number_of_cases << "\n"
+                  << "Summary: " << summary_path << "\n\n";
 
         int case_id = 0;
-        for (int N : cfg.meshes) {
-            for (int Re : cfg.re_list) {
-                for (const auto& scheme : cfg.schemes) {
-                    for (const auto& pressure_solver : cfg.pressure_solvers) {
-                        for (const auto& implementation : cfg.implementations) {
-                            ++case_id;
-                            std::ostringstream name;
-                            name << "case_" << std::setw(3) << std::setfill('0') << case_id << std::setfill(' ')
-                                 << "_N" << N << "_Re" << Re << "_" << lower(scheme)
-                                 << "_" << upper(pressure_solver) << "_" << lower(implementation);
-                            const std::string case_name = name.str();
+        int failed_cases = 0;
+        std::map<std::tuple<int, std::string, std::string>, InitialState> continuation_states;
 
-                            std::cout << "[" << std::setw(3) << std::setfill('0') << case_id << std::setfill(' ')
-                                      << "] N=" << N << " Re=" << Re << " Scheme=" << scheme
-                                      << " Pressure=" << pressure_solver << " Implementation=" << implementation << "\n";
-
-                            Result r = solve_lid_cavity(N, Re, scheme, pressure_solver, implementation, cfg);
-                            Metrics metrics = validate_against_ghia(r, cfg);
-                            const std::string quality = quality_label(r, metrics);
-                            write_summary_row(summary, case_id, r, metrics, quality);
-                            summary.flush();
-                            write_history_csv(r, case_name, cfg);
-                            if (cfg.save_fields) write_field_csv(r, case_name, cfg);
-
-                            std::cout << "      status=" << r.status << " quality=" << quality
-                                      << " iter=" << r.iterations << "/" << r.localMaxIter
-                                      << " Rc_mass=" << std::scientific << std::setprecision(3) << r.final_Rc_mass
-                                      << " Rc_div=" << r.final_Rc_div
-                                      << " runtime=" << std::fixed << std::setprecision(2) << r.runtime << "s"
-                                      << " avgPiter=" << std::setprecision(1) << r.avg_poisson_iters
-                                      << " pSat=" << std::setprecision(2) << r.pressure_saturation_ratio << "\n";
-                            if (metrics.available) {
-                                std::cout << "      Ghia L2: u=" << std::scientific << std::setprecision(3) << metrics.u_L2
-                                          << "(limit " << metrics.u_limit << "), v=" << metrics.v_L2
-                                          << "(limit " << metrics.v_limit << "), pass=" << (metrics.pass ? 1 : 0) << "\n";
-                            }
-                            std::cout << std::defaultfloat;
+        for (const int cells : meshes) {
+            for (const std::string& scheme : schemes) {
+                for (const std::string& pressure_solver : pressure_solvers) {
+                    for (const int reynolds : reynolds_numbers) {
+                        ++case_id;
+                        const auto key = std::make_tuple(cells, lower(scheme), upper(pressure_solver));
+                        InitialState initial;
+                        const auto previous = continuation_states.find(key);
+                        if (previous != continuation_states.end()) {
+                            initial = previous->second;
                         }
+
+                        std::cout << '[' << std::setw(3) << std::setfill('0') << case_id << std::setfill(' ')
+                                  << "] N=" << cells
+                                  << " Re=" << reynolds
+                                  << " Scheme=" << scheme
+                                  << " Pressure=" << pressure_solver << '\n';
+
+                        Result result = solve_case(
+                            case_id,
+                            cells,
+                            reynolds,
+                            scheme,
+                            pressure_solver,
+                            config,
+                            initial
+                        );
+                        write_summary_row(summary, result);
+                        summary.flush();
+                        write_history(result, config);
+                        if (config.save_fields) {
+                            write_fields(result, config);
+                        }
+
+                        if (result.status == "converged") {
+                            continuation_states[key] = InitialState{
+                                true,
+                                result.u_face,
+                                result.v_face,
+                                result.pressure
+                            };
+                        } else {
+                            ++failed_cases;
+                        }
+
+                        std::cout << "      status=" << result.status
+                                  << " quality=" << result.quality
+                                  << " iter=" << result.iterations << '/' << result.local_max_iterations
+                                  << " vel=" << std::scientific << result.final_residuals.velocity_update_linf
+                                  << " div=" << result.final_residuals.divergence_linf
+                                  << " runtime=" << std::fixed << std::setprecision(2) << result.runtime_seconds << "s\n";
+                        if (result.ghia.available) {
+                            std::cout << "      Ghia L2: u=" << std::scientific << result.ghia.u_l2
+                                      << " v=" << result.ghia.v_l2
+                                      << " pass=" << (result.ghia.passed ? 1 : 0) << '\n';
+                        }
+                        std::cout << std::defaultfloat;
                     }
                 }
             }
         }
 
-        std::cout << "\nFinished. CSV outputs are in " << cfg.data_dir << "\n";
+        std::cout << "\nFinished. CSV outputs are in " << config.data_directory << '\n';
+        if (config.strict_exit && failed_cases > 0) {
+            return 2;
+        }
         return 0;
-    } catch (const std::exception& e) {
-        std::cerr << "ERROR: " << e.what() << "\n";
+    } catch (const std::exception& error) {
+        std::cerr << "ERROR: " << error.what() << '\n';
         print_usage(argv[0]);
         return 1;
     }

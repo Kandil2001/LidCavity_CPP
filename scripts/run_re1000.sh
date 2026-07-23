@@ -5,11 +5,12 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 bash "$ROOT_DIR/scripts/build.sh"
 
-# Canonical Phase 2 regression case. It should finish with status=converged.
+# Converged higher-Reynolds-number representative case.
 "$ROOT_DIR/bin/lid_cavity" \
     --single \
     --N 32 \
-    --Re 100 \
-    --scheme upwind \
+    --Re 1000 \
+    --scheme central \
     --pressure RBSOR \
+    --tol-velocity 1e-7 \
     --strict
