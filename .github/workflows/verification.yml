@@ -45,3 +45,12 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build/verification --output-on-failure
+
+  canonical-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run canonical converged case
+        run: bash scripts/run_canonical_regression.sh
