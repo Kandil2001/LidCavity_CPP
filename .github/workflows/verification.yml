@@ -1,0 +1,47 @@
+name: Numerical verification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verification:
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        build_type: [Debug, Release]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Select compiler
+        shell: bash
+        run: |
+          if [[ "${{ matrix.compiler }}" == "gcc" ]]; then
+            echo "CC=gcc" >> "$GITHUB_ENV"
+            echo "CXX=g++" >> "$GITHUB_ENV"
+          else
+            echo "CC=clang" >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build/verification
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DLIDCAVITY_ENABLE_SANITIZERS=${{ matrix.build_type == 'Debug' && 'ON' || 'OFF' }}
+
+      - name: Build
+        run: cmake --build build/verification --parallel
+
+      - name: Test
+        run: ctest --test-dir build/verification --output-on-failure
