@@ -1,77 +1,96 @@
-# Phase 2: Verification and Convergence Contract
+# Phase 2: Verification and Convergence
 
-This phase adds a verification layer around the standalone C++ lid-driven-cavity project before the existing production solver is numerically changed.
+Phase 2 is now integrated into the standalone C++ lid-driven-cavity solver.
 
-## Why this is needed
+## Main production change
 
-The original 36-case study completed its configured executions, but those runs reached their maximum outer-iteration limits. Execution completion, benchmark-profile agreement, and iterative convergence are different results and must remain separate.
+The earlier collocated pressure-correction implementation has been replaced in the production path by a staggered Marker-and-Cell solver. Pressure is stored at cell centers, horizontal velocity on vertical faces, and vertical velocity on horizontal faces.
+
+This gives the solver a compatible pressure-gradient, velocity-correction, and divergence arrangement and removes the pressure-velocity compatibility problem that prevented the original study from reaching strict iterative convergence.
 
 ## Convergence contract
 
-A future cavity run may report `converged` only when all of the following hold:
+A cavity run reports `converged` only when all of the following hold:
 
-- the velocity-update Linf residual is below its dimensionless tolerance;
-- the local divergence Linf residual is below its dimensionless tolerance;
-- the local divergence L2 residual is below its dimensionless tolerance;
-- the integrated global mass imbalance is below its tolerance;
+- dimensionless velocity-update `Linf` residual is below tolerance;
+- dimensionless divergence `Linf` residual is below tolerance;
+- dimensionless divergence `L2` residual is below tolerance;
+- global boundary mass imbalance is below tolerance;
 - the pressure equation converged for the current outer iteration;
-- all conditions remain satisfied for a configured number of consecutive iterations;
-- all fields and metrics are finite.
+- all conditions remain satisfied for the configured number of consecutive iterations;
+- all fields and metrics remain finite.
 
 The explicit solver statuses are:
 
-- `running`
-- `converged`
-- `max_iterations`
-- `pressure_not_converged`
-- `stagnated`
-- `diverged`
-- `non_finite`
+```text
+converged
+max_iterations
+pressure_not_converged
+stagnated
+diverged
+non_finite
+```
 
-The `max_iterations` status must never be interpreted as convergence.
+`max_iterations` is never treated as convergence.
 
-## Verification tests added
+## Verification tests
 
 ### Operator compatibility
 
-The verification library uses a forward pressure gradient and backward divergence pair. In the interior, their composition is checked against the standard five-point Laplacian:
+The verification library checks analytical gradient, divergence, and Laplacian fields, including the discrete compatibility relation:
 
 ```text
 D(G(phi)) = L(phi)
 ```
 
-The test also checks constant-field gradients, zero-field divergence, and non-finite-value detection.
-
 ### Manufactured Poisson solution
 
-The Poisson verification problem uses
+The independent Poisson verification uses:
 
 ```text
 phi(x,y) = sin(pi x) sin(pi y)
+laplacian(phi) = -2 pi^2 sin(pi x) sin(pi y)
 ```
 
-with homogeneous Dirichlet boundaries and
+The tests cover:
 
-```text
-laplacian(phi) = -2 pi^2 sin(pi x) sin(pi y).
-```
-
-The tests verify:
-
-- convergence on 17x17, 33x33, and 65x65 grids;
-- approximately second-order spatial convergence;
-- agreement between RBGS and RBSOR solutions;
+- `17x17`, `33x33`, and `65x65` grids;
+- approximately second-order error reduction;
+- RBGS/RBSOR agreement;
 - true equation-residual reduction.
 
 ### Convergence-state logic
 
-The convergence tracker is tested independently for:
+The convergence tracker is tested for:
 
 - minimum-iteration protection;
 - consecutive-pass requirements;
-- repeated pressure-solver failures;
-- non-finite residuals;
+- pressure-solver failure handling;
+- non-finite residual handling;
 - maximum-iteration termination.
+
+### Production regression
+
+CTest now runs the actual production executable for:
+
+```text
+N = 32
+Re = 100
+scheme = upwind
+pressure solver = RBSOR
+```
+
+The test uses `--strict` and fails unless the case converges.
+
+## Verified run sets
+
+The following sets were exercised during Phase 2 development:
+
+- canonical `N=32`, `Re=100`, upwind, RBSOR;
+- six `N=32` cases using `Re=100`, `400`, and `1000`, with upwind and central schemes;
+- `N=16`, `32`, and `64` at `Re=100`, central, RBSOR.
+
+All of these cases reached the configured iterative convergence criteria and passed their selected Ghia centerline thresholds.
 
 ## Running the checks
 
@@ -87,6 +106,18 @@ cmake --build build/phase2-verification --parallel
 ctest --test-dir build/phase2-verification --output-on-failure
 ```
 
-## Next integration step
+## Running the solver
 
-The verification library intentionally does not silently change the existing full-study results. The next step is to integrate the convergence tracker and dimensionless residual definitions into `src/lid_cavity.cpp`, then tune one canonical case (`N=32`, `Re=100`, upwind, RBSOR) before regenerating the 36-case study.
+```bash
+bash scripts/run_single.sh
+bash scripts/run_medium.sh
+bash scripts/run_grid.sh
+```
+
+The complete 36-case configuration remains available through:
+
+```bash
+bash scripts/run_full.sh
+```
+
+That run contains slower RBGS and `N=128` cases and is intended for a workstation or HPC node.
